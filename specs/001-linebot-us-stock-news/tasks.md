@@ -87,61 +87,61 @@
 
 ### Database & Data Access
 
-- [ ] T011 Create SQLAlchemy database models in src/models/database.py (Index, Stock, NewsArticle, TaiwanStock, APICache, QueryLog, UserQuery models based on data-model.md)
-- [ ] T012 Implement database connection & session management in src/db/database.py (SQLite for dev, PostgreSQL for prod)
-- [ ] T013 Create database initialization script (migrations/schema setup)
-- [ ] T014 Implement repository pattern in src/db/repositories.py for data access (IndexRepository, StockRepository, NewsRepository, TaiwanStockRepository, CacheRepository)
+- [x] T011 Create SQLAlchemy database models in src/models/database.py (Index, Stock, NewsArticle, TaiwanStock, APICache, QueryLog, UserQuery models based on data-model.md)
+- [x] T012 Implement database connection & session management in src/db/database.py (SQLite for dev, PostgreSQL for prod)
+- [x] T013 Create database initialization script (migrations/schema setup)
+- [x] T014 Implement repository pattern in src/db/repositories.py for data access (IndexRepository, StockRepository, NewsRepository, TaiwanStockRepository, CacheRepository)
 
 ### Configuration & Secrets Management
 
-- [ ] T015 Create src/config.py to load environment variables (LINE channel token/secret, API keys, database URL, server host/port, log level, timeout settings)
-- [ ] T016 Validate all required environment variables are present on startup
-- [ ] T017 Create src/exceptions.py with custom exception classes (APIError, SignatureError, ValidationError, TimeoutError, DatabaseError)
+- [x] T015 Create src/config.py to load environment variables (LINE channel token/secret, API keys, database URL, server host/port, log level, timeout settings)
+- [x] T016 Validate all required environment variables are present on startup
+- [x] T017 Create src/exceptions.py with custom exception classes (APIError, SignatureError, ValidationError, TimeoutError, DatabaseError)
 
 ### Logging & Monitoring Infrastructure
 
-- [ ] T018 Implement structured logging in src/utils/logger.py (JSON format, structured fields for user_id, query_type, timestamp)
+- [x] T018 Implement structured logging in src/utils/logger.py (JSON format, structured fields for user_id, query_type, timestamp)
 - [ ] T019 Create request/response logging middleware (log all Webhook events and API calls)
 - [ ] T020 Set up log rotation and log file management
 
 ### API & Middleware Layer
 
-- [ ] T021 Initialize FastAPI application in src/main.py (app instance, CORS configuration, health check endpoint /health)
-- [ ] T022 Implement HMAC-SHA256 signature verification middleware in src/api/webhooks.py (verify X-Line-Signature header on all requests)
-- [ ] T023 Create error handling middleware (catch exceptions, format error responses in Traditional Chinese)
-- [ ] T024 Add request ID tracking middleware for debugging and logging
+- [x] T021 Initialize FastAPI application in src/main.py (app instance, CORS configuration, health check endpoint /health)
+- [x] T022 Implement HMAC-SHA256 signature verification middleware in src/api/webhooks.py (verify X-Line-Signature header on all requests)
+- [x] T023 Create error handling middleware (catch exceptions, format error responses in Traditional Chinese)
+- [x] T024 Add request ID tracking middleware for debugging and logging
 
 ### Validation & Utility Functions
 
-- [ ] T025 Implement input validation functions in src/utils/validators.py:
+- [x] T025 Implement input validation functions in src/utils/validators.py:
   - `validate_stock_code()` - Check uppercase 1-5 letter format
   - `validate_tw_stock_code()` - Check 4-digit format
   - `validate_query_text()` - Check length and content
-- [ ] T026 Implement message formatting utilities in src/utils/formatters.py:
+- [x] T026 Implement message formatting utilities in src/utils/formatters.py:
   - `format_index_message()` - Format index data to zh-TW conditions style message
   - `format_stock_message()` - Format stock data with prices, changes, news
   - `format_news_message()` - Format news articles (title, summary, source, date)
   - `format_tw_stock_message()` - Format Taiwan stock correlations with relationship descriptions
   - `truncate_summary()` - Truncate news summaries to 150 chars while preserving sentences
-- [ ] T027 Implement retry logic in src/utils/retry.py with exponential backoff for external API calls
-- [ ] T028 Create Pydantic schemas in src/models/schemas.py (Request/Response models from contracts/)
+- [x] T027 Implement retry logic in src/utils/retry.py with exponential backoff for external API calls
+- [x] T028 Create Pydantic schemas in src/models/schemas.py (Request/Response models from contracts/)
 
 ### Cache Management
 
-- [ ] T029 Implement APICache layer in src/db/repositories.py with TTL support:
+- [x] T029 Implement APICache layer in src/db/repositories.py with TTL support:
   - Index cache: 5 minutes
   - Stock cache: 5 minutes
   - News cache: 1 hour
   - Taiwan stock cache: 24 hours
-- [ ] T030 Create cache invalidation logic for stale data
+- [x] T030 Create cache invalidation logic for stale data
 
 ### Tests for Foundational Phase (TDD - write before implementation)
 
-- [ ] T031 [P] Create unit tests in tests/unit/test_validators.py for all validation functions
-- [ ] T032 [P] Create unit tests in tests/unit/test_formatters.py for all message formatting functions
-- [ ] T033 [P] Create unit tests in tests/unit/test_config.py for environment variable loading
-- [ ] T034 [P] Create integration tests in tests/integration/test_webhook_signature.py for HMAC-SHA256 verification
-- [ ] T035 [P] Create integration tests in tests/integration/test_error_handling.py for error scenarios
+- [x] T031 [P] Create unit tests in tests/unit/test_validators.py for all validation functions
+- [x] T032 [P] Create unit tests in tests/unit/test_formatters.py for all message formatting functions
+- [x] T033 [P] Create unit tests in tests/unit/test_config.py for environment variable loading
+- [x] T034 [P] Create integration tests in tests/integration/test_webhook_signature.py for HMAC-SHA256 verification
+- [x] T035 [P] Create integration tests in tests/integration/test_error_handling.py for error scenarios
 
 **Checkpoint**: Infrastructure ready, all core services functional, database initialized ✓
 
@@ -159,8 +159,8 @@
 
 ### Models for US1
 
-- [ ] T036 Create Index domain model in src/models/domain.py with fields: id, zh_name, current_price, previous_close, change_amount, change_percent, high_52w, low_52w, last_updated, data_source, direction property
-- [ ] T037 [P] Create SQLAlchemy Index ORM model in src/models/database.py if not done in Phase 2
+- [x] T036 Create Index domain model in src/models/domain.py with fields: id, zh_name, current_price, previous_close, change_amount, change_percent, high_52w, low_52w, last_updated, data_source, direction property
+- [x] T037 [P] Create SQLAlchemy Index ORM model in src/models/database.py if not done in Phase 2
 
 ### Integration Layer for US1
 

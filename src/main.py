@@ -3,16 +3,18 @@ FastAPI application initialization and configuration.
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 from datetime import datetime
 
 from src.config import get_settings
-from src.db.database import init_db, close_db
+from src.db.database import init_db, close_db, get_db
 from src.utils.logger import init_logger, get_logger
 from src.exceptions import ApplicationError, SignatureError
+from src.api.webhooks import verify_webhook_request, WebhookEventHandler
 
 # Initialize logger
 logger = init_logger()
@@ -99,24 +101,32 @@ def create_app() -> FastAPI:
             "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
-    # Stub: Webhook endpoint (to be implemented in Phase 3)
+    # Webhook endpoint with signature verification
     @app.post("/webhook/line")
-    async def line_webhook(request: Request):
+    async def line_webhook(
+        payload: dict = Depends(verify_webhook_request),
+        db: AsyncSession = Depends(get_db),
+    ):
         """
         LINE Messaging API Webhook endpoint.
         
-        Receives events from LINE server and processes them.
+        Receives events from LINE server, verifies signature, and processes them.
+        Signature verification uses HMAC-SHA256.
         """
-        # TODO: Implement HMAC-SHA256 signature verification (T022)
-        # TODO: Implement event processing logic (T043)
+        request_id = str(uuid.uuid4())
+        app_logger.info(f"[{request_id}] Webhook received with {len(payload.get('events', []))} events")
         
-        body = await request.json()
-        app_logger.info(f"Received webhook: {body}")
-        
-        return JSONResponse(
-            status_code=200,
-            content={"message": "OK"},
-        )
+        try:
+            handler = WebhookEventHandler(db)
+            response = await handler.handle_webhook(payload)
+            app_logger.info(f"[{request_id}] Webhook processing complete")
+            return response
+        except Exception as e:
+            app_logger.error(f"[{request_id}] Webhook processing error: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Internal server error"}
+            )
 
     app_logger.info("✅ FastAPI application created successfully")
     return app
