@@ -29,6 +29,32 @@ async def lifespan(app: FastAPI):
     app_logger.info("Application starting up...")
     await init_db()
     app_logger.info("✅ Database initialized")
+    
+    # Pre-warm Taiwan stock cache with common stocks (non-blocking)
+    try:
+        from src.integrations.tw_stock_integration import TaiwanStockClient
+        client = TaiwanStockClient()
+        
+        # Popular Taiwan stocks to pre-load
+        popular_stocks = ['2330', '2454', '2317', '2303', '2330', '1216', '2331', '2409']
+        
+        async def preload_cache():
+            """Load cache in background"""
+            app_logger.debug("Starting Taiwan stock cache pre-load...")
+            for code in popular_stocks:
+                try:
+                    await client.fetch_tw_stock(code, retries=1)
+                except Exception as e:
+                    app_logger.debug(f"Pre-load failed for {code}: {e}")
+            app_logger.debug("Taiwan stock cache pre-load complete")
+            await client.close()
+        
+        # Schedule cache pre-load (don't await - run in background)
+        import asyncio
+        asyncio.create_task(preload_cache())
+    except Exception as e:
+        app_logger.warning(f"Failed to initialize Taiwan stock cache: {e}")
+    
     yield
     # Shutdown
     app_logger.info("Application shutting down...")
