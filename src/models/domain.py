@@ -41,7 +41,7 @@ class UserQueryRequest(BaseModel):
     """Request model for user queries"""
     query_type: QueryTypeEnum
     query_text: str = Field(..., min_length=1, max_length=100)
-    stock_code: Optional[str] = Field(None, regex=r"^[A-Z]{1,5}$")
+    stock_code: Optional[str] = Field(None, pattern=r"^[A-Z]{1,5}$")
 
     class Config:
         json_schema_extra = {
@@ -75,12 +75,12 @@ class Index(BaseModel):
     """Stock index model"""
     id: str  # e.g., "^GSPC", "^IXIC", "^SOX"
     zh_name: str = Field(..., min_length=2, max_length=30)  # e.g., "S&P 500"
-    current_price: Decimal = Field(..., decimal_places=2, ge=0)
-    previous_close: Decimal = Field(..., decimal_places=2, ge=0)
-    change_amount: Decimal = Field(..., decimal_places=2)
-    change_percent: Decimal = Field(..., decimal_places=2)
-    high_52w: Decimal = Field(..., decimal_places=2, ge=0)
-    low_52w: Decimal = Field(..., decimal_places=2, ge=0)
+    current_price: Decimal = Field(..., ge=0)
+    previous_close: Decimal = Field(..., ge=0)
+    change_amount: Decimal = Field(...)
+    change_percent: Decimal = Field(...)
+    high_52w: Decimal = Field(..., ge=0)
+    low_52w: Decimal = Field(..., ge=0)
     last_updated: datetime
     data_source: DataSourceEnum
 
@@ -113,16 +113,16 @@ class Index(BaseModel):
 
 class Stock(BaseModel):
     """Individual stock model"""
-    code: str = Field(..., regex=r"^[A-Z]{1,5}$")
+    code: str = Field(..., pattern=r"^[A-Z]{1,5}$")
     company_name: str
     zh_name: Optional[str]
-    current_price: Decimal = Field(..., decimal_places=2, ge=0)
-    previous_close: Decimal = Field(..., decimal_places=2, ge=0)
-    change_amount: Decimal = Field(..., decimal_places=2)
-    change_percent: Decimal = Field(..., decimal_places=2)
-    market_cap_billion: Optional[Decimal] = Field(None, decimal_places=1, ge=0)
-    pe_ratio: Optional[Decimal] = Field(None, decimal_places=2, ge=0)
-    dividend_yield: Optional[Decimal] = Field(None, decimal_places=2, ge=0)
+    current_price: Decimal = Field(..., ge=0)
+    previous_close: Decimal = Field(..., ge=0)
+    change_amount: Decimal = Field(...)
+    change_percent: Decimal = Field(...)
+    market_cap_billion: Optional[Decimal] = Field(None, ge=0)
+    pe_ratio: Optional[Decimal] = Field(None, ge=0)
+    dividend_yield: Optional[Decimal] = Field(None, ge=0)
     sector: Optional[str]
     industry: Optional[str]
     last_updated: datetime
@@ -201,8 +201,8 @@ class NewsArticle(BaseModel):
 
 class TaiwanStock(BaseModel):
     """Taiwan stock correlation model"""
-    us_code: str = Field(..., regex=r"^[A-Z]{1,5}$")
-    tw_code: str = Field(..., regex=r"^[0-9]{4}$")
+    us_code: str = Field(..., pattern=r"^[A-Z]{1,5}$")
+    tw_code: str = Field(..., pattern=r"^[0-9]{4}$")
     tw_name: str
     relationship_type: str  # e.g., "supplier", "customer", "competitor", "industry_peer"
     relationship_detail: str = Field(..., max_length=200)  # Explanation of relationship

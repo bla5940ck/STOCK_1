@@ -6,6 +6,7 @@ services:
     container_name: linebot-us-stock
     ports:
       - "8000:8000"
+    env_file: .env
     environment:
       - DATABASE_URL=sqlite:///./app.db
       - DEBUG=False
@@ -14,8 +15,6 @@ services:
       - ./src:/app/src
       - ./logs:/app/logs
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-    networks:
-      - linebot-network
 
   postgres:
     image: postgres:15-alpine
@@ -28,14 +27,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks:
-      - linebot-network
     profiles:
       - postgres
-
-networks:
-  linebot-network:
-    driver: bridge
 
 volumes:
   postgres_data:

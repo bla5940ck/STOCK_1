@@ -147,7 +147,7 @@ class AlphaVantageClient:
         try:
             # Check for API rate limit error
             if "Note" in data or "Information" in data:
-                logger.warning(f"Alpha Vantage rate limit exceeded for {symbol}")
+                logger.warning(f"Alpha Vantage rate limit exceeded for {symbol}: {data.get('Note') or data.get('Information')}")
                 return None
 
             # Check for error in response
@@ -158,7 +158,7 @@ class AlphaVantageClient:
             quote = data.get("Global Quote", {})
             
             if not quote:
-                logger.warning(f"No quote data in Alpha Vantage response for {symbol}")
+                logger.warning(f"No quote data in Alpha Vantage response for {symbol}. Full response: {data}")
                 return None
 
             # Extract fields
@@ -192,4 +192,85 @@ class AlphaVantageClient:
 
         except (KeyError, ValueError, TypeError) as e:
             logger.error(f"Failed to parse {symbol} response from Alpha Vantage: {e}")
+            return None
+
+    async def fetch_stock(self, symbol: str) -> Optional[dict]:
+        """
+        Fetch stock data from Alpha Vantage using GLOBAL_QUOTE.
+        
+        Args:
+            symbol: Stock symbol (e.g., "AAPL")
+            
+        Returns:
+            Dict with stock data or None if failed
+        """
+        session = await self._get_session()
+        
+        params = {
+            "function": "GLOBAL_QUOTE",
+            "symbol": symbol,
+            "apikey": self.api_key,
+        }
+
+        try:
+            async with session.get(
+                f"{self.BASE_URL}/query",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
+            ) as response:
+                if response.status != 200:
+                    logger.warning(f"Alpha Vantage API error for stock {symbol}: {response.status}")
+                    return None
+
+                data = await response.json()
+                
+                # Check for API rate limit or error
+                if "Note" in data or "Information" in data:
+                    logger.warning(f"Alpha Vantage rate limit for {symbol}: {data.get('Note') or data.get('Information')}")
+                    return None
+
+                if "Error Message" in data:
+                    logger.warning(f"Alpha Vantage error for {symbol}: {data['Error Message']}")
+                    return None
+
+                quote = data.get("Global Quote", {})
+                
+                if not quote:
+                    logger.warning(f"No quote data in Alpha Vantage response for {symbol}. Full response: {data}")
+                    return None
+
+                # Parse stock data
+                price = quote.get("05. price")
+                previous_close = quote.get("08. previous close")
+                
+                if not price or not previous_close:
+                    logger.warning(f"Missing required fields for stock {symbol}")
+                    return None
+
+                current_price = Decimal(str(price))
+                prev_close = Decimal(str(previous_close))
+                change_amount = current_price - prev_close
+                change_percent = (change_amount / prev_close * 100) if prev_close > 0 else Decimal("0")
+
+                return {
+                    "code": symbol,
+                    "name": symbol,
+                    "current_price": float(current_price),
+                    "previous_close": float(prev_close),
+                    "change_amount": float(change_amount),
+                    "change_percent": float(change_percent),
+                    "high_52w": float(Decimal(str(quote.get("03. high", 0)))),
+                    "low_52w": float(Decimal(str(quote.get("04. low", 0)))),
+                    "volume": int(quote.get("06. volume", 0)),
+                    "data_source": "alpha_vantage",
+                }
+
+        except asyncio.TimeoutError:
+            logger.warning(f"Alpha Vantage timeout for stock {symbol}")
+            return None
+        except aiohttp.ClientError as e:
+            logger.warning(f"Alpha Vantage connection error for stock {symbol}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching stock {symbol} from Alpha Vantage: {e}")
             return None

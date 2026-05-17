@@ -11,14 +11,18 @@ ENV PYTHONUNBUFFERED=1 \
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    g++ \
+    libpq-dev \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies with retry
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r requirements.txt
+    pip install --default-timeout=1000 -r requirements.txt || \
+    pip install --default-timeout=1000 -r requirements.txt
 
 # Copy application code
 COPY src ./src

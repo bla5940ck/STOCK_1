@@ -145,7 +145,7 @@ class WebhookEventHandler:
                 user_id=user_id,
                 query_text=text,
                 query_type="unknown",
-                status="failed",
+                status="error",
                 error_message=str(e)
             )
             return None
@@ -159,11 +159,17 @@ class WebhookEventHandler:
                 user_id=user_id,
                 query_text=query_text,
                 query_type="index",
-                status="success" if result.get("success") else "failed",
+                status="success" if result.get("success") else "error",
                 error_message=result.get("error_message"),
             )
             
-            return result.get("message")
+            # Return message or error message
+            message = result.get("message")
+            if message:
+                return message
+            else:
+                error_msg = result.get("error_message", "查询失败，请稍后重试")
+                return f"❌ {error_msg}"
         
         elif detect_query_type(query_text) == "news":
             # News query (新聞, news)
@@ -173,11 +179,17 @@ class WebhookEventHandler:
                 user_id=user_id,
                 query_text=query_text,
                 query_type="news",
-                status="success" if result.get("success") else "failed",
+                status="success" if result.get("success") else "error",
                 error_message=result.get("error_message"),
             )
             
-            return result.get("message")
+            # Return message or error message
+            message = result.get("message")
+            if message:
+                return message
+            else:
+                error_msg = result.get("error_message", "查询失败，请稍后重试")
+                return f"❌ {error_msg}"
         
         elif detect_query_type(query_text) == "stock":
             # Stock query (AAPL, TSLA, etc.)
@@ -189,24 +201,47 @@ class WebhookEventHandler:
                     user_id=user_id,
                     query_text=query_text,
                     query_type="stock",
-                    status="success" if result.get("success") else "failed",
+                    status="success" if result.get("success") else "error",
                     error_message=result.get("error_message"),
                 )
                 
-                return result.get("message")
+                # Return message or error message
+                message = result.get("message")
+                if message:
+                    return message
+                else:
+                    error_msg = result.get("error_message", "查询失败，请稍后重试")
+                    return f"❌ {error_msg}"
             except Exception as e:
                 logger.warning(f"Stock query validation failed: {e}")
                 await self.log_query(
                     user_id=user_id,
                     query_text=query_text,
                     query_type="stock",
-                    status="failed",
+                    status="error",
                     error_message=str(e)
                 )
-                return None
+                return f"❌ 股票查询错误：{str(e)}"
 
+        # Unknown query type - return help message
         logger.debug(f"Unknown query type for: {query_text}")
-        return None
+        help_message = (
+            "🤖 美股查詢助手\n\n"
+            "可以查詢以下內容：\n"
+            "• 股票代碼（如: AAPL, TSLA）\n"
+            "• 美股指數（輸入: 美股, 指數）\n"
+            "• 新聞（輸入: 新聞）\n"
+            "• 台股（輸入: 台股）\n\n"
+            "例如: AAPL、美股、新聞"
+        )
+        await self.log_query(
+            user_id=user_id,
+            query_text=query_text,
+            query_type="help",
+            status="success",
+            error_message=None,
+        )
+        return help_message
 
     async def process_postback_event(self, event: Dict[str, Any]) -> Optional[str]:
         """
@@ -248,11 +283,17 @@ class WebhookEventHandler:
                     user_id=user_id,
                     query_text=us_code,
                     query_type="tw_stock",
-                    status="success" if result.get("success") else "failed",
+                    status="success" if result.get("success") else "error",
                     error_message=result.get("error_message"),
                 )
                 
-                return result.get("message")
+                # Return message or error message
+                message = result.get("message")
+                if message:
+                    return message
+                else:
+                    error_msg = result.get("error_message", "查询失败，请稍后重试")
+                    return f"❌ {error_msg}"
 
             elif action == "skip":
                 # User clicked "skip" button - don't respond
@@ -305,7 +346,7 @@ class WebhookEventHandler:
             True if successful
         """
         settings = get_settings()
-        url = "https://api.line.biz/v2/bot/message/reply"
+        url = "https://api.line.me/v2/bot/message/reply"
         
         headers = {
             "Content-Type": "application/json",

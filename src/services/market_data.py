@@ -294,8 +294,44 @@ class MarketDataService:
         # Try Alpha Vantage as fallback
         try:
             logger.info(f"Falling back to Alpha Vantage for {stock_code}")
-            # Alpha Vantage doesn't have detailed stock data, so we skip it
-            # and go directly to error
+            stock_data = await self.alpha_vantage_client.fetch_stock(stock_code)
+            
+            if stock_data:
+                from datetime import datetime
+                from src.models.domain import DataSourceEnum
+                stock = Stock(
+                    code=stock_data.get("code", stock_code),
+                    company_name=stock_data.get("name", stock_code),
+                    zh_name=None,
+                    current_price=stock_data.get("current_price", 0),
+                    previous_close=stock_data.get("previous_close", 0),
+                    change_amount=stock_data.get("change_amount", 0),
+                    change_percent=stock_data.get("change_percent", 0),
+                    market_cap_billion=None,
+                    pe_ratio=None,
+                    dividend_yield=None,
+                    sector=None,
+                    industry=None,
+                    last_updated=datetime.utcnow(),
+                    data_source=DataSourceEnum.ALPHA_VANTAGE,
+                )
+                
+                result = {
+                    "success": True,
+                    "data": stock,
+                    "source": "alpha_vantage",
+                }
+                
+                cache_data = {"stock": stock.dict()}
+                await self.cache_manager.set(
+                    cache_key,
+                    cache_data,
+                    "stock",
+                    CachePolicies.STOCK_TTL_MINUTES,
+                )
+                
+                logger.info(f"Successfully fetched {stock_code} from Alpha Vantage")
+                return result
             
         except Exception as e:
             logger.warning(f"Fallback failed for {stock_code}: {e}")

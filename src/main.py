@@ -44,9 +44,9 @@ def create_app() -> FastAPI:
         title="LINE Bot US Stock 美股與新聞助理",
         description="Real-time US stock market and economic news LINE Bot",
         version="0.1.0",
-        docs_url="/docs" if settings.DEBUG else None,
-        redoc_url="/redoc" if settings.DEBUG else None,
-        openapi_url="/openapi.json" if settings.DEBUG else None,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
         lifespan=lifespan,
     )
 
