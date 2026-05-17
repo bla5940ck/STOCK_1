@@ -1,0 +1,142 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LINE Webhook Payload",
+  "description": "LINE Messaging API Webhook payload schema for bot messages",
+  "type": "object",
+  "required": ["events", "destination"],
+  "properties": {
+    "events": {
+      "type": "array",
+      "description": "Array of events sent by LINE server",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": ["type", "timestamp", "source", "replyToken"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["message", "follow", "unfollow", "join", "leave", "postback", "beacon"],
+            "description": "Event type"
+          },
+          "timestamp": {
+            "type": "integer",
+            "description": "Unix timestamp in milliseconds"
+          },
+          "source": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["user", "group", "room"],
+                "description": "Source type"
+              },
+              "userId": {
+                "type": "string",
+                "description": "User ID (only present for user/group/room sources)",
+                "minLength": 1,
+                "maxLength": 50
+              },
+              "groupId": {
+                "type": "string",
+                "description": "Group ID (only present for group source)"
+              },
+              "roomId": {
+                "type": "string",
+                "description": "Room ID (only present for room source)"
+              }
+            }
+          },
+          "replyToken": {
+            "type": "string",
+            "description": "Reply token for sending reply messages",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "message": {
+            "type": "object",
+            "required": ["type", "id"],
+            "description": "Message object (only present for message type)",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["text", "image", "video", "audio", "file", "location"],
+                "description": "Message type"
+              },
+              "id": {
+                "type": "string",
+                "description": "Message ID"
+              },
+              "text": {
+                "type": "string",
+                "description": "Text content (only present for text type)",
+                "minLength": 1,
+                "maxLength": 1000,
+                "examples": ["美股", "AAPL", "新聞", "台股", "TSLA"]
+              }
+            }
+          },
+          "postback": {
+            "type": "object",
+            "description": "Postback object (only present for postback type)",
+            "required": ["data"],
+            "properties": {
+              "data": {
+                "type": "string",
+                "description": "Postback data (e.g., Taiwan stock code selection)",
+                "minLength": 1,
+                "maxLength": 100,
+                "examples": ["action=tw_stock&code=2330", "action=stock&code=AAPL"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "destination": {
+      "type": "string",
+      "description": "Bot user ID (destination of the webhook)",
+      "minLength": 1,
+      "maxLength": 50
+    }
+  },
+  "examples": [
+    {
+      "events": [
+        {
+          "type": "message",
+          "timestamp": 1620000000000,
+          "source": {
+            "type": "user",
+            "userId": "U4af4980482..." 
+          },
+          "replyToken": "nHuyWiB7yP5Zw52FIkcQT",
+          "message": {
+            "type": "text",
+            "id": "100001",
+            "text": "美股"
+          }
+        }
+      ],
+      "destination": "xxxxxxxxxx"
+    },
+    {
+      "events": [
+        {
+          "type": "postback",
+          "timestamp": 1620000010000,
+          "source": {
+            "type": "user",
+            "userId": "U4af4980482..."
+          },
+          "replyToken": "nHuyWiB7yP5Zw52FIkcQT",
+          "postback": {
+            "data": "action=tw_stock&us_code=AAPL&tw_code=2330"
+          }
+        }
+      ],
+      "destination": "xxxxxxxxxx"
+    }
+  ]
+}

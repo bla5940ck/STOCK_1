@@ -1,0 +1,137 @@
+"""
+FastAPI application initialization and configuration.
+"""
+
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+import uuid
+from datetime import datetime
+
+from src.config import get_settings
+from src.db.database import init_db, close_db
+from src.utils.logger import init_logger, get_logger
+from src.exceptions import ApplicationError, SignatureError
+
+# Initialize logger
+logger = init_logger()
+app_logger = get_logger(__name__)
+
+
+# Lifespan context manager for startup/shutdown
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle application startup and shutdown"""
+    # Startup
+    app_logger.info("Application starting up...")
+    await init_db()
+    app_logger.info("✅ Database initialized")
+    yield
+    # Shutdown
+    app_logger.info("Application shutting down...")
+    await close_db()
+    app_logger.info("✅ Database closed")
+
+
+def create_app() -> FastAPI:
+    """Create and configure FastAPI application"""
+    settings = get_settings()
+
+    app = FastAPI(
+        title="LINE Bot US Stock 美股與新聞助理",
+        description="Real-time US stock market and economic news LINE Bot",
+        version="0.1.0",
+        docs_url="/docs" if settings.DEBUG else None,
+        redoc_url="/redoc" if settings.DEBUG else None,
+        openapi_url="/openapi.json" if settings.DEBUG else None,
+        lifespan=lifespan,
+    )
+
+    # CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Request ID middleware
+    @app.middleware("http")
+    async def add_request_id(request: Request, call_next):
+        request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+    # Error handler
+    @app.exception_handler(ApplicationError)
+    async def application_error_handler(request: Request, exc: ApplicationError):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error_code": exc.error_code,
+                "error_message": exc.message,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "request_id": getattr(request.state, "request_id", None),
+            },
+        )
+
+    # Health check endpoint
+    @app.get("/health")
+    async def health_check():
+        """Health check endpoint"""
+        return {
+            "status": "ok",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+
+    # Info endpoint
+    @app.get("/info")
+    async def info():
+        """Application info endpoint"""
+        return {
+            "name": "LINE Bot US Stock 美股與新聞助理",
+            "version": "0.1.0",
+            "environment": "production" if not settings.DEBUG else "development",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+
+    # Stub: Webhook endpoint (to be implemented in Phase 3)
+    @app.post("/webhook/line")
+    async def line_webhook(request: Request):
+        """
+        LINE Messaging API Webhook endpoint.
+        
+        Receives events from LINE server and processes them.
+        """
+        # TODO: Implement HMAC-SHA256 signature verification (T022)
+        # TODO: Implement event processing logic (T043)
+        
+        body = await request.json()
+        app_logger.info(f"Received webhook: {body}")
+        
+        return JSONResponse(
+            status_code=200,
+            content={"message": "OK"},
+        )
+
+    app_logger.info("✅ FastAPI application created successfully")
+    return app
+
+
+# Create app instance
+app = create_app()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    settings = get_settings()
+    uvicorn.run(
+        app,
+        host=settings.SERVER_HOST,
+        port=settings.SERVER_PORT,
+        reload=settings.DEBUG,
+    )

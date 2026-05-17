@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Stock Query Response",
+  "description": "Response schema for individual stock queries with related news",
+  "type": "object",
+  "required": ["success", "timestamp", "data"],
+  "properties": {
+    "success": {
+      "type": "boolean",
+      "description": "Whether the query was successful"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the response"
+    },
+    "data": {
+      "type": "object",
+      "description": "Stock information with related news",
+      "required": ["code", "company_name", "current_price", "change_amount", "change_percent", "previous_close"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z]{1,5}$",
+          "description": "Stock symbol (uppercase, 1-5 chars)",
+          "example": "AAPL"
+        },
+        "company_name": {
+          "type": "string",
+          "description": "Company name in English",
+          "example": "Apple Inc."
+        },
+        "zh_name": {
+          "type": "string",
+          "description": "Company name in Traditional Chinese",
+          "example": "蘋果"
+        },
+        "current_price": {
+          "type": "number",
+          "description": "Current stock price in USD",
+          "minimum": 0,
+          "example": 189.45
+        },
+        "change_amount": {
+          "type": "number",
+          "description": "Price change in USD",
+          "example": 2.15
+        },
+        "change_percent": {
+          "type": "number",
+          "description": "Percentage change",
+          "example": 1.14
+        },
+        "previous_close": {
+          "type": "number",
+          "description": "Previous close price",
+          "example": 187.30
+        },
+        "market_cap_billion": {
+          "type": "number",
+          "description": "Market cap in billions USD",
+          "example": 2980
+        },
+        "pe_ratio": {
+          "type": "number",
+          "description": "Price-to-earnings ratio",
+          "example": 28.5
+        },
+        "dividend_yield": {
+          "type": "number",
+          "description": "Dividend yield percentage",
+          "example": 0.45
+        },
+        "sector": {
+          "type": "string",
+          "description": "Industry sector",
+          "example": "Technology"
+        },
+        "industry": {
+          "type": "string",
+          "description": "Specific industry",
+          "example": "Consumer Electronics"
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["↑ 上升", "↓ 下跌", "→ 平穩"],
+          "description": "Visual direction indicator"
+        },
+        "data_source": {
+          "type": "string",
+          "enum": ["yahoo_finance", "alpha_vantage"],
+          "description": "Data source"
+        },
+        "last_updated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        },
+        "related_news": {
+          "type": "array",
+          "description": "3-5 most recent related news articles",
+          "minItems": 0,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "required": ["title", "summary", "source", "published_at"],
+            "properties": {
+              "title": {
+                "type": "string",
+                "description": "News headline",
+                "minLength": 5,
+                "maxLength": 300
+              },
+              "summary": {
+                "type": "string",
+                "description": "News summary in Traditional Chinese (100-150 chars)",
+                "minLength": 50,
+                "maxLength": 150
+              },
+              "source": {
+                "type": "string",
+                "description": "News source",
+                "example": "Google News"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "Full news article URL"
+              },
+              "published_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Publication timestamp"
+              }
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "description": "Error details if success=false",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": ["STOCK_NOT_FOUND", "INVALID_CODE", "API_TIMEOUT", "API_ERROR", "UNKNOWN_ERROR"],
+          "description": "Error code"
+        },
+        "message": {
+          "type": "string",
+          "description": "Error message in Traditional Chinese",
+          "example": "找不到股票代碼 INVALID，請確認代碼是否正確"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "success": true,
+      "timestamp": "2026-05-17T10:30:00Z",
+      "data": {
+        "code": "AAPL",
+        "company_name": "Apple Inc.",
+        "zh_name": "蘋果",
+        "current_price": 189.45,
+        "change_amount": 2.15,
+        "change_percent": 1.14,
+        "previous_close": 187.30,
+        "market_cap_billion": 2980,
+        "pe_ratio": 28.5,
+        "dividend_yield": 0.45,
+        "sector": "Technology",
+        "industry": "Consumer Electronics",
+        "direction": "↑ 上升",
+        "data_source": "yahoo_finance",
+        "last_updated": "2026-05-17T10:30:00Z",
+        "related_news": [
+          {
+            "title": "Apple Launches New AI Features in iOS 18",
+            "summary": "蘋果發佈 iOS 18 新功能，整合 AI 技術提升用戶體驗，股價創新高...",
+            "source": "Google News",
+            "url": "https://news.google.com/articles/...",
+            "published_at": "2026-05-17T08:30:00Z"
+          },
+          {
+            "title": "iPhone 16 Demand Exceeds Expectations",
+            "summary": "市場調查顯示 iPhone 16 需求超出預期，蘋果供應鏈夥伴台積電受惠...",
+            "source": "Google News",
+            "url": "https://news.google.com/articles/...",
+            "published_at": "2026-05-16T15:20:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "success": false,
+      "timestamp": "2026-05-17T10:35:00Z",
+      "data": null,
+      "error": {
+        "code": "STOCK_NOT_FOUND",
+        "message": "找不到股票代碼 INVALID，請確認代碼是否正確"
+      }
+    }
+  ]
+}

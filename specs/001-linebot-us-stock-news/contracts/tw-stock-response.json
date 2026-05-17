@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Taiwan Stock Correlation Response",
+  "description": "Response schema for Taiwan stock correlation queries related to US stocks",
+  "type": "object",
+  "required": ["success", "timestamp", "data"],
+  "properties": {
+    "success": {
+      "type": "boolean",
+      "description": "Whether the query was successful"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the response"
+    },
+    "data": {
+      "type": "object",
+      "description": "Taiwan stock correlation data",
+      "required": ["us_code", "us_company_name", "related_stocks"],
+      "properties": {
+        "us_code": {
+          "type": "string",
+          "pattern": "^[A-Z]{1,5}$",
+          "description": "US stock code",
+          "example": "AAPL"
+        },
+        "us_company_name": {
+          "type": "string",
+          "description": "US company name",
+          "example": "Apple Inc."
+        },
+        "total_related": {
+          "type": "integer",
+          "description": "Total number of related Taiwan stocks",
+          "minimum": 0
+        },
+        "related_stocks": {
+          "type": "array",
+          "description": "List of related Taiwan stocks",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "required": ["tw_code", "tw_name", "relationship_type", "relationship_detail", "strength"],
+            "properties": {
+              "tw_code": {
+                "type": "string",
+                "pattern": "^[0-9]{4}$",
+                "description": "Taiwan stock code",
+                "example": "2330"
+              },
+              "tw_name": {
+                "type": "string",
+                "description": "Taiwan company name in Traditional Chinese",
+                "example": "台積電"
+              },
+              "relationship_type": {
+                "type": "string",
+                "enum": ["supplier", "customer", "competitor", "partner"],
+                "description": "Type of relationship"
+              },
+              "relationship_detail": {
+                "type": "string",
+                "description": "Detailed description of relationship in Traditional Chinese",
+                "example": "A 核心供應商，晶片代工",
+                "minLength": 10,
+                "maxLength": 200
+              },
+              "strength": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+                "description": "Strength of the relationship",
+                "example": "high"
+              },
+              "strength_emoji": {
+                "type": "string",
+                "enum": ["🔴 高度關聯", "🟡 中度關聯", "🟢 低度關聯"],
+                "description": "Visual strength indicator"
+              },
+              "last_verified_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Last verification timestamp"
+              }
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "description": "Error details if success=false",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": ["STOCK_NOT_FOUND", "INVALID_CODE", "NO_CORRELATION", "DB_ERROR", "UNKNOWN_ERROR"],
+          "description": "Error code"
+        },
+        "message": {
+          "type": "string",
+          "description": "Error message in Traditional Chinese",
+          "example": "找不到股票代碼 INVALID 的台股關聯標的"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "success": true,
+      "timestamp": "2026-05-17T10:45:00Z",
+      "data": {
+        "us_code": "AAPL",
+        "us_company_name": "Apple Inc.",
+        "total_related": 3,
+        "related_stocks": [
+          {
+            "tw_code": "2330",
+            "tw_name": "台積電",
+            "relationship_type": "supplier",
+            "relationship_detail": "A 核心供應商，晶片代工",
+            "strength": "high",
+            "strength_emoji": "🔴 高度關聯",
+            "last_verified_at": "2026-05-17T00:00:00Z"
+          },
+          {
+            "tw_code": "2454",
+            "tw_name": "聯發科",
+            "relationship_type": "partner",
+            "relationship_detail": "晶片設計合作夥伴",
+            "strength": "medium",
+            "strength_emoji": "🟡 中度關聯",
+            "last_verified_at": "2026-05-15T00:00:00Z"
+          },
+          {
+            "tw_code": "4938",
+            "tw_name": "和碩",
+            "relationship_type": "supplier",
+            "relationship_detail": "製造和代工夥伴",
+            "strength": "medium",
+            "strength_emoji": "🟡 中度關聯",
+            "last_verified_at": "2026-05-10T00:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "success": true,
+      "timestamp": "2026-05-17T10:50:00Z",
+      "data": {
+        "us_code": "TSLA",
+        "us_company_name": "Tesla Inc.",
+        "total_related": 1,
+        "related_stocks": [
+          {
+            "tw_code": "2317",
+            "tw_name": "鴻海",
+            "relationship_type": "partner",
+            "relationship_detail": "電動車代工製造夥伴",
+            "strength": "high",
+            "strength_emoji": "🔴 高度關聯",
+            "last_verified_at": "2026-05-17T00:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "success": false,
+      "timestamp": "2026-05-17T10:55:00Z",
+      "data": null,
+      "error": {
+        "code": "STOCK_NOT_FOUND",
+        "message": "找不到股票代碼 INVALID，請確認代碼是否正確"
+      }
+    }
+  ]
+}

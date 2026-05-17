@@ -1,0 +1,158 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Index Query Response",
+  "description": "Response schema for US market index queries (S&P 500, NASDAQ, Philadelphia Semiconductor)",
+  "type": "object",
+  "required": ["success", "timestamp", "data"],
+  "properties": {
+    "success": {
+      "type": "boolean",
+      "description": "Whether the query was successful"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the response"
+    },
+    "data": {
+      "type": "array",
+      "description": "Array of three major US indices",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["id", "zh_name", "current_price", "change_amount", "change_percent", "previous_close", "high_52w", "low_52w", "data_source"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": ["^GSPC", "^IXIC", "^SOX"],
+            "description": "Index symbol"
+          },
+          "zh_name": {
+            "type": "string",
+            "enum": ["S&P 500", "那斯達克", "費城半導體"],
+            "description": "Chinese name"
+          },
+          "current_price": {
+            "type": "number",
+            "description": "Current index points",
+            "minimum": 0,
+            "example": 5234.88
+          },
+          "change_amount": {
+            "type": "number",
+            "description": "Point change (can be negative)",
+            "example": 15.23
+          },
+          "change_percent": {
+            "type": "number",
+            "description": "Percentage change",
+            "example": 0.29
+          },
+          "previous_close": {
+            "type": "number",
+            "description": "Previous close points",
+            "example": 5219.65
+          },
+          "high_52w": {
+            "type": "number",
+            "description": "52-week high",
+            "example": 5487.63
+          },
+          "low_52w": {
+            "type": "number",
+            "description": "52-week low",
+            "example": 4542.12
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["↑ 上升", "↓ 下跌", "→ 平穩"],
+            "description": "Visual direction indicator"
+          },
+          "data_source": {
+            "type": "string",
+            "enum": ["yahoo_finance", "alpha_vantage"],
+            "description": "Data source"
+          },
+          "last_updated": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last update timestamp"
+          }
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "description": "Error details if success=false",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": ["API_TIMEOUT", "API_ERROR", "INVALID_REQUEST", "UNKNOWN_ERROR"],
+          "description": "Error code"
+        },
+        "message": {
+          "type": "string",
+          "description": "Error message in Traditional Chinese",
+          "example": "無法連接資料來源，請稍後重試"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "success": true,
+      "timestamp": "2026-05-17T10:30:00Z",
+      "data": [
+        {
+          "id": "^GSPC",
+          "zh_name": "S&P 500",
+          "current_price": 5234.88,
+          "change_amount": 15.23,
+          "change_percent": 0.29,
+          "previous_close": 5219.65,
+          "high_52w": 5487.63,
+          "low_52w": 4542.12,
+          "direction": "↑ 上升",
+          "data_source": "yahoo_finance",
+          "last_updated": "2026-05-17T10:30:00Z"
+        },
+        {
+          "id": "^IXIC",
+          "zh_name": "那斯達克",
+          "current_price": 16428.71,
+          "change_amount": 245.32,
+          "change_percent": 1.51,
+          "previous_close": 16183.39,
+          "high_52w": 17354.20,
+          "low_52w": 13768.41,
+          "direction": "↑ 上升",
+          "data_source": "yahoo_finance",
+          "last_updated": "2026-05-17T10:30:00Z"
+        },
+        {
+          "id": "^SOX",
+          "zh_name": "費城半導體",
+          "current_price": 4187.50,
+          "change_amount": 62.15,
+          "change_percent": 1.49,
+          "previous_close": 4125.35,
+          "high_52w": 4562.89,
+          "low_52w": 3210.45,
+          "direction": "↑ 上升",
+          "data_source": "yahoo_finance",
+          "last_updated": "2026-05-17T10:30:00Z"
+        }
+      ]
+    },
+    {
+      "success": false,
+      "timestamp": "2026-05-17T10:35:00Z",
+      "data": [],
+      "error": {
+        "code": "API_TIMEOUT",
+        "message": "無法連接資料來源，請稍後重試"
+      }
+    }
+  ]
+}

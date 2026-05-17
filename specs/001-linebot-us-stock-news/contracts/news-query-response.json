@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "News Query Response",
+  "description": "Response schema for US economic news queries",
+  "type": "object",
+  "required": ["success", "timestamp", "data"],
+  "properties": {
+    "success": {
+      "type": "boolean",
+      "description": "Whether the query was successful"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the response"
+    },
+    "data": {
+      "type": "object",
+      "description": "News collection with articles",
+      "required": ["category", "articles"],
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": ["us_economic", "stock_related", "market_movement"],
+          "description": "News category"
+        },
+        "total_articles": {
+          "type": "integer",
+          "description": "Total articles in this batch",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "articles": {
+          "type": "array",
+          "description": "3-5 news articles",
+          "minItems": 0,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "summary", "source", "published_at", "url"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique article ID (UUID)"
+              },
+              "title": {
+                "type": "string",
+                "description": "Article headline",
+                "minLength": 5,
+                "maxLength": 300
+              },
+              "summary": {
+                "type": "string",
+                "description": "Article summary in Traditional Chinese (100-150 chars)",
+                "minLength": 50,
+                "maxLength": 150
+              },
+              "source": {
+                "type": "string",
+                "description": "News source name",
+                "example": "Google News"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "Full article URL"
+              },
+              "published_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Publication timestamp"
+              },
+              "related_stocks": {
+                "type": "array",
+                "description": "Related stock codes (if any)",
+                "maxItems": 5,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Z]{1,5}$"
+                },
+                "example": ["AAPL", "MSFT", "TSLA"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "description": "Error details if success=false",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": ["NEWS_FETCH_ERROR", "API_TIMEOUT", "RSS_PARSE_ERROR", "UNKNOWN_ERROR"],
+          "description": "Error code"
+        },
+        "message": {
+          "type": "string",
+          "description": "Error message in Traditional Chinese",
+          "example": "無法取得最新新聞，請稍後重試"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "success": true,
+      "timestamp": "2026-05-17T10:35:00Z",
+      "data": {
+        "category": "us_economic",
+        "total_articles": 3,
+        "articles": [
+          {
+            "id": "article-001",
+            "title": "AI Chip Demand Surges, Pushing Semiconductor Stocks Higher",
+            "summary": "美國科技股因 AI 晶片需求增加而上漲，那斯達克指數創下新高。晶片製造商和軟體企業成為投資者關注焦點...",
+            "source": "Google News",
+            "url": "https://news.google.com/articles/abc123",
+            "published_at": "2026-05-17T10:00:00Z",
+            "related_stocks": ["NVDA", "AMD", "AAPL", "MSFT"]
+          },
+          {
+            "id": "article-002",
+            "title": "Federal Reserve Signals Potential Rate Hike in June",
+            "summary": "美聯準主席暗示 6 月會議可能升息，引發股市波動。分析師認為此舉將對科技股和成長股造成壓力...",
+            "source": "Google News",
+            "url": "https://news.google.com/articles/def456",
+            "published_at": "2026-05-17T09:15:00Z",
+            "related_stocks": ["SPY", "QQQ"]
+          },
+          {
+            "id": "article-003",
+            "title": "Tesla Reports Strong Q1 Earnings, Beats Expectations",
+            "summary": "特斯拉第一季財報超預期，新車交付量創新高。公司計劃投資更多資源於電池技術研發，股價上漲 4.5%...",
+            "source": "Google News",
+            "url": "https://news.google.com/articles/ghi789",
+            "published_at": "2026-05-17T08:30:00Z",
+            "related_stocks": ["TSLA"]
+          }
+        ]
+      }
+    },
+    {
+      "success": false,
+      "timestamp": "2026-05-17T10:40:00Z",
+      "data": {
+        "category": "us_economic",
+        "total_articles": 0,
+        "articles": []
+      },
+      "error": {
+        "code": "NEWS_FETCH_ERROR",
+        "message": "無法取得最新新聞，請稍後重試"
+      }
+    }
+  ]
+}

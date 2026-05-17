@@ -1,0 +1,43 @@
+# Core Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# LINE Bot SDK
+line-bot-sdk==3.4.0
+
+# Async HTTP Client
+aiohttp==3.9.1
+httpx==0.25.1
+
+# Database & ORM
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9  # PostgreSQL adapter
+
+# External APIs
+yfinance==0.2.32
+feedparser==6.0.10
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+httpx[http2]==0.25.1
+
+# Code Quality
+black==23.11.0
+ruff==0.1.8
+mypy==1.7.1
+pylint==3.0.2
+
+# Utilities
+python-dotenv==1.0.0
+python-dateutil==2.8.2
+Babel==2.13.1  # For i18n (optional)
+
+# Logging & Monitoring
+python-json-logger==2.0.7
+
+# Development
+ipython==8.17.2

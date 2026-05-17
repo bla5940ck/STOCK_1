@@ -1,0 +1,62 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+CONTRIBUTING.md
+DEPLOYMENT.md
+ARCHITECTURE.md
+*.md
+
+# Development
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python
+.venv/
+venv/
+env/
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Testing
+tests/
+.tox/
+pytest.ini
+conftest.py
+
+# Logs
+*.log
+logs/
+
+# Database (development)
+*.db
+*.sqlite
+
+# Specification & Planning
+specs/
+.specify/
+PROMPTS_HISTORY.md
+analysis.md
+checklists/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
+
+# Environment (use .env at runtime instead)
+.env.example
+.env.*.example
