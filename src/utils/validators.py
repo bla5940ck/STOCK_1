@@ -131,15 +131,23 @@ def is_tw_stock_code_or_name(text: str) -> bool:
     Check if text is a Taiwan stock code or company name.
     
     Args:
-        text: Stock code (e.g., "2330") or company name (e.g., "台積電")
+        text: Stock code (e.g., "2330") or company name (e.g., "台積電", "健策")
         
     Returns:
-        True if it's a valid Taiwan stock code or name
+        True if it looks like a Taiwan stock query (4-digit code or Chinese company name)
     """
-    from src.integrations.tw_stock_integration import TaiwanStockClient
+    text = text.strip()
     
-    resolved = TaiwanStockClient.resolve_tw_stock_code(text)
-    return resolved is not None
+    # Check if it's a direct 4-digit code
+    if text.isdigit() and len(text) == 4:
+        return True
+    
+    # Check if it contains Chinese characters (potential company name)
+    # This is a heuristic check - actual validation happens in search_tw_stock()
+    if any('\u4e00' <= c <= '\u9fff' for c in text):
+        return True
+    
+    return False
 
 
 def detect_query_type(text: str) -> Optional[str]:

@@ -16,65 +16,15 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-# Taiwan stock code to name mapping
-TW_STOCK_NAMES = {
-    # 半導體製造
-    "2330": {"name": "Taiwan Semiconductor Manufacturing", "zh_name": "台積電", "code": "2330"},
-    "2303": {"name": "United Microelectronics", "zh_name": "聯電", "code": "2303"},
-    # IC 設計
-    "2454": {"name": "MediaTek", "zh_name": "聯發科", "code": "2454"},
-    "2379": {"name": "Realtek Semiconductor", "zh_name": "瑞昱", "code": "2379"},
-    "2408": {"name": "Nanya Technology", "zh_name": "南亞科", "code": "2408"},
-    # 電腦品牌 / EMS
-    "2317": {"name": "Hon Hai Precision (Foxconn)", "zh_name": "鴻海", "code": "2317"},
-    "2357": {"name": "ASUSTeK Computer", "zh_name": "華碩", "code": "2357"},
-    "2353": {"name": "Acer", "zh_name": "宏碁", "code": "2353"},
-    "2376": {"name": "Gigabyte Technology", "zh_name": "技嘉", "code": "2376"},
-    "2382": {"name": "Quanta Computer", "zh_name": "廣達", "code": "2382"},
-    "3231": {"name": "Wistron Corporation", "zh_name": "緯創", "code": "3231"},
-    # 光學 / 精密
-    "3008": {"name": "Largan Precision", "zh_name": "大立光", "code": "3008"},
-    # PCB / 基板
-    "2348": {"name": "Broadtech International", "zh_name": "華通", "code": "2348"},
-    "3037": {"name": "Unimicron Technology", "zh_name": "欣興", "code": "3037"},
-    # 面板
-    "3481": {"name": "Innolux Corporation", "zh_name": "群創", "code": "3481"},
-    "2409": {"name": "AU Optronics", "zh_name": "友達", "code": "2409"},
-    # 電源管理 / 電子
-    "2308": {"name": "Delta Electronics", "zh_name": "台達電", "code": "2308"},
-    # 消費電子
-    "2498": {"name": "HTC Corporation", "zh_name": "宏達電", "code": "2498"},
-    # 電信
-    "2412": {"name": "Chunghwa Telecom", "zh_name": "中華電", "code": "2412"},
-    # 海運
-    "2603": {"name": "Evergreen Marine", "zh_name": "長榮", "code": "2603"},
-    "2609": {"name": "Yang Ming Marine", "zh_name": "陽明", "code": "2609"},
-    # 航空
-    "2610": {"name": "China Airlines", "zh_name": "華航", "code": "2610"},
-    "2618": {"name": "Eva Airways", "zh_name": "長榮航", "code": "2618"},
-    # 金融
-    "2882": {"name": "Cathay Financial Holdings", "zh_name": "國泰金", "code": "2882"},
-    "2884": {"name": "E.SUN Financial Holdings", "zh_name": "玉山金", "code": "2884"},
-    "2891": {"name": "CTBC Financial Holding", "zh_name": "中信金", "code": "2891"},
-    # 石化
-    "1301": {"name": "Formosa Plastics", "zh_name": "台塑", "code": "1301"},
-    "1303": {"name": "Nan Ya Plastics", "zh_name": "南亞", "code": "1303"},
-    # 水泥
-    "1101": {"name": "Taiwan Cement", "zh_name": "台泥", "code": "1101"},
-    # 食品
-    "1216": {"name": "Uni-President Enterprises", "zh_name": "統一", "code": "1216"},
-    # 工業自動化
-    "1590": {"name": "AIRTAC International", "zh_name": "亞德客", "code": "1590"},
-    # 製鞋
-    "9904": {"name": "Pou Chen Corporation", "zh_name": "寶成", "code": "9904"},
-}
-
-
 class TaiwanStockClient:
     """Taiwan stock data fetcher using TWSE (Taiwan Stock Exchange) open API"""
 
     TWSE_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
+    TWSE_LISTING_URL = "https://mis.twse.com.tw/stock/api/twtrade.jsp"  # For stock list
     TIMEOUT = 8.0
+    
+    # Simple in-memory cache for stock names -> codes (populated on first search)
+    _stock_name_cache = {}  # e.g., {"台積電": "2330", "健策": "2425", ...}
     
     USER_AGENTS = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -186,10 +136,9 @@ class TaiwanStockClient:
                         change_amount = current_price - previous_close if previous_close > 0 else Decimal("0")
                         change_percent = (change_amount / previous_close * 100) if previous_close > 0 else Decimal("0")
 
-                        # Prefer known stock info, fall back to TWSE names
-                        stock_info = TW_STOCK_NAMES.get(stock_code, {})
-                        zh_name = stock_info.get("zh_name", msg.get("n", stock_code))
-                        en_name = stock_info.get("name", msg.get("nf", stock_code))
+                        # Stock name from TWSE API
+                        zh_name = msg.get("n", stock_code)
+                        en_name = msg.get("nf", stock_code)
                         
                         return {
                             "code": stock_code,
@@ -230,27 +179,96 @@ class TaiwanStockClient:
             code_or_name: Stock code (e.g., "2330") or company name (e.g., "台積電")
             
         Returns:
-            Stock code or None if not found
+            Stock code or None if not found. 
+            For codes: returns directly. For names: should use search_tw_stock() for dynamic lookup.
         """
         code_or_name = code_or_name.strip()
         
         # Check if it's a direct code (4 digits)
         if code_or_name.isdigit() and len(code_or_name) == 4:
-            if code_or_name in TW_STOCK_NAMES:
-                return code_or_name
-            # If not in our mapping, still try to fetch it (might be valid code)
+            # Return the code directly - TWSE API will validate it
             return code_or_name
         
-        # Check if it's a company name — exact match first, then partial
-        for code, info in TW_STOCK_NAMES.items():
-            if info["zh_name"].lower() == code_or_name.lower():
-                return code
+        # For company names, return None here - caller should use search_tw_stock() instead
+        # This supports dynamic lookup without hardcoded mappings
+        return None
 
-        # Partial match: user input contained in zh_name or zh_name contained in user input
-        for code, info in TW_STOCK_NAMES.items():
-            zh = info["zh_name"].lower()
-            query = code_or_name.lower()
-            if query in zh or zh in query:
+    async def search_tw_stock(self, company_name: str, retries: int = 2) -> Optional[str]:
+        """
+        Search for Taiwan stock code by company name using cached stock list.
+        
+        First tries to find exact match in cache, then fetches from TWSE if not cached.
+        
+        Args:
+            company_name: Chinese company name (e.g., "台積電", "健策")
+            retries: Number of retry attempts
+            
+        Returns:
+            Stock code if found, None otherwise
+        """
+        company_name = company_name.strip().lower()
+        
+        # Try to find in cache first
+        for cached_name, code in TaiwanStockClient._stock_name_cache.items():
+            if cached_name.lower() == company_name or company_name in cached_name.lower():
+                logger.debug(f"Found {company_name} in cache -> {code}")
                 return code
-
+        
+        # If not in cache, try to fetch the stock directly
+        # (in case user knows the code or it's a common stock)
+        # Try fetching by trying the first few possible formats
+        session = await self._get_session()
+        
+        # Build a simple query using the name
+        params = {
+            "ex_ch": f"tse_{company_name}.tw",
+            "json": "1",
+            "delay": "0",
+        }
+        
+        headers = {
+            "User-Agent": self._get_random_user_agent(),
+            "Referer": "https://mis.twse.com.tw/stock/fibest.jsp",
+        }
+        
+        for attempt in range(retries):
+            try:
+                async with session.get(
+                    self.TWSE_URL,
+                    params=params,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json(content_type=None)
+                        msg_array = data.get("msgArray", [])
+                        
+                        if msg_array:
+                            msg = msg_array[0]
+                            # Cache this result
+                            stock_zh_name = msg.get("n", "").strip()
+                            if stock_zh_name:
+                                TaiwanStockClient._stock_name_cache[stock_zh_name] = company_name
+                            
+                            ex_ch = msg.get("ex_ch", "")
+                            if ex_ch and "_" in ex_ch:
+                                code = ex_ch.split("_")[1].replace(".tw", "")
+                                logger.debug(f"Found {company_name} via API -> {code}")
+                                return code
+                    
+                    if response.status == 429 and attempt < retries - 1:
+                        wait_time = 2 ** attempt
+                        logger.warning(f"Rate limited searching {company_name}, retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                        
+            except asyncio.TimeoutError:
+                if attempt < retries - 1:
+                    logger.debug(f"Timeout searching {company_name}, retrying...")
+                    await asyncio.sleep(1)
+                    continue
+            except Exception as e:
+                logger.debug(f"Error searching stock {company_name}: {e}")
+        
+        logger.debug(f"No stock found for {company_name}")
         return None

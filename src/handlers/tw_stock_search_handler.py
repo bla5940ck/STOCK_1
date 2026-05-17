@@ -33,8 +33,12 @@ async def handle_tw_stock_search(db: AsyncSession, query: str) -> dict:
     
     try:
         # Resolve stock code from query
-        from src.integrations.tw_stock_integration import TaiwanStockClient as TWClient
-        stock_code = TWClient.resolve_tw_stock_code(query)
+        stock_code = TaiwanStockClient.resolve_tw_stock_code(query)
+        
+        # If not a direct code, try to search by name
+        if not stock_code:
+            logger.debug(f"Code not found, searching by name: {query}")
+            stock_code = await tw_client.search_tw_stock(query)
         
         if not stock_code:
             logger.warning(f"Taiwan stock not found: {query}")
