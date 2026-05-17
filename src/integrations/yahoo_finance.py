@@ -9,7 +9,7 @@ from decimal import Decimal
 from datetime import datetime
 import random
 
-from src.models.domain import Index, DataSourceEnum
+from src.models.domain import Index, Stock, DataSourceEnum
 from src.exceptions import APIError, TimeoutError
 from src.utils.logger import get_logger
 
@@ -197,21 +197,24 @@ class YahooFinanceClient:
             logger.error(f"Failed to parse {symbol} response: {e}")
             return None
 
-    async def fetch_stock(self, symbol: str) -> Optional[dict]:
+    async def fetch_stock(self, symbol: str) -> Optional[Stock]:
         """
-        Fetch stock data from Yahoo Finance.
+        Fetch individual stock data from Yahoo Finance.
         
         Args:
             symbol: Stock symbol (e.g., "AAPL")
             
         Returns:
-            Dictionary with stock data or None if failed
+            Stock object or None if failed
+            
+        Raises:
+            TimeoutError: If request times out
         """
         session = await self._get_session()
         
         url = f"{self.BASE_URL}/v10/finance/quoteSummary/{symbol.upper()}"
         params = {
-            "modules": "price,summaryDetail",
+            "modules": "price,summaryDetail,assetProfile",
         }
         
         headers = {
@@ -227,14 +230,92 @@ class YahooFinanceClient:
             ) as response:
                 if response.status != 200:
                     logger.error(f"Yahoo Finance API error for {symbol}: {response.status}")
-                    return None
+                    raise APIError(
+                        error_code="E003_API_ERROR",
+                        message=f"Yahoo Finance 返回錯誤狀態碼：{response.status}"
+                    )
 
                 data = await response.json()
-                return data
+                return self._parse_stock_response(symbol, data)
 
         except asyncio.TimeoutError:
-            logger.warning(f"Yahoo Finance timeout for {symbol}")
-            return None
+            logger.error(f"Yahoo Finance timeout for {symbol}")
+            raise TimeoutError(
+                error_code="E001_TIMEOUT",
+                message="Yahoo Finance API 響應超時（5 秒內無回應）"
+            )
         except aiohttp.ClientError as e:
-            logger.warning(f"Yahoo Finance connection error for {symbol}: {e}")
+            logger.error(f"Yahoo Finance connection error for {symbol}: {e}")
+            raise APIError(
+                error_code="E003_API_ERROR",
+                message=f"無法連接 Yahoo Finance：{str(e)}"
+            )
+
+    def _parse_stock_response(
+        self, symbol: str, data: dict
+    ) -> Optional[Stock]:
+        """
+        Parse Yahoo Finance stock response.
+        
+        Args:
+            symbol: Stock symbol
+            data: JSON response from Yahoo Finance
+            
+        Returns:
+            Stock object or None if parsing fails
+        """
+        try:
+            if "quoteSummary" not in data or "result" not in data["quoteSummary"]:
+                logger.error(f"Unexpected response structure for {symbol}")
+                return None
+
+            result = data["quoteSummary"]["result"][0]
+            price_data = result.get("price", {})
+            detail_data = result.get("summaryDetail", {})
+            asset_data = result.get("assetProfile", {})
+
+            # Extract required fields
+            current_price = Decimal(str(price_data.get("regularMarketPrice", {}).get("raw", 0)))
+            previous_close = Decimal(str(price_data.get("regularMarketPreviousClose", {}).get("raw", 0)))
+
+            if current_price == 0 or previous_close == 0:
+                logger.warning(f"Invalid price data for {symbol}")
+                return None
+
+            change_amount = current_price - previous_close
+            change_percent = (change_amount / previous_close * 100) if previous_close > 0 else Decimal("0")
+
+            # Extract optional fields
+            market_cap = detail_data.get("marketCap", {}).get("raw")
+            market_cap_billion = Decimal(str(market_cap / 1_000_000_000)) if market_cap else None
+
+            pe_ratio = detail_data.get("trailingPE", {}).get("raw")
+            pe_ratio_decimal = Decimal(str(pe_ratio)) if pe_ratio else None
+
+            dividend_yield = detail_data.get("dividendYield", {}).get("raw")
+            dividend_yield_decimal = Decimal(str(dividend_yield * 100)) if dividend_yield else None
+
+            company_name = asset_data.get("longName", symbol)
+            sector = asset_data.get("sector")
+            industry = asset_data.get("industry")
+
+            return Stock(
+                code=symbol.upper(),
+                company_name=company_name,
+                zh_name=None,  # Would need separate translation service
+                current_price=current_price.quantize(Decimal("0.01")),
+                previous_close=previous_close.quantize(Decimal("0.01")),
+                change_amount=change_amount.quantize(Decimal("0.01")),
+                change_percent=change_percent.quantize(Decimal("0.01")),
+                market_cap_billion=market_cap_billion.quantize(Decimal("0.1")) if market_cap_billion else None,
+                pe_ratio=pe_ratio_decimal.quantize(Decimal("0.01")) if pe_ratio_decimal else None,
+                dividend_yield=dividend_yield_decimal.quantize(Decimal("0.01")) if dividend_yield_decimal else None,
+                sector=sector,
+                industry=industry,
+                last_updated=datetime.utcnow(),
+                data_source=DataSourceEnum.YAHOO_FINANCE,
+            )
+
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error(f"Failed to parse {symbol} response: {e}")
             return None

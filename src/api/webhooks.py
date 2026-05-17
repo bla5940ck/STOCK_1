@@ -17,11 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import get_settings
 from src.exceptions import SignatureError
 from src.utils.logger import get_logger
-from src.utils.validators import validate_query_text, is_index_keyword
+from src.utils.validators import validate_query_text, is_index_keyword, detect_query_type, validate_stock_code
 from src.db.database import get_db
 from src.db.repositories import QueryLogRepository
 from src.models.database import QueryTypeEnum, QueryStatusEnum
 from src.handlers.index_handler import handle_index_query
+from src.handlers.stock_handler import handle_stock_query
+from src.handlers.news_handler import handle_news_query
 
 logger = get_logger(__name__)
 
@@ -149,6 +151,7 @@ class WebhookEventHandler:
 
         # Route based on query type
         if is_index_keyword(query_text):
+            # Index query (美股, 指數)
             result = await handle_index_query(self.db)
             
             await self.log_query(
@@ -161,11 +164,45 @@ class WebhookEventHandler:
             
             return result.get("message")
         
-        # TODO: Route stock and news queries (Phase 4)
-        # elif detect_query_type(query_text) == "stock":
-        #     return await handle_stock_query(self.db, query_text)
-        # elif detect_query_type(query_text) == "news":
-        #     return await handle_news_query(self.db, query_text)
+        elif detect_query_type(query_text) == "news":
+            # News query (新聞, news)
+            result = await handle_news_query(self.db)
+            
+            await self.log_query(
+                user_id=user_id,
+                query_text=query_text,
+                query_type="news",
+                status="success" if result.get("success") else "failed",
+                error_message=result.get("error_message"),
+            )
+            
+            return result.get("message")
+        
+        elif detect_query_type(query_text) == "stock":
+            # Stock query (AAPL, TSLA, etc.)
+            try:
+                stock_code = validate_stock_code(query_text)
+                result = await handle_stock_query(self.db, stock_code)
+                
+                await self.log_query(
+                    user_id=user_id,
+                    query_text=query_text,
+                    query_type="stock",
+                    status="success" if result.get("success") else "failed",
+                    error_message=result.get("error_message"),
+                )
+                
+                return result.get("message")
+            except Exception as e:
+                logger.warning(f"Stock query validation failed: {e}")
+                await self.log_query(
+                    user_id=user_id,
+                    query_text=query_text,
+                    query_type="stock",
+                    status="failed",
+                    error_message=str(e)
+                )
+                return None
 
         logger.debug(f"Unknown query type for: {query_text}")
         return None

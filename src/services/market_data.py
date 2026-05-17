@@ -5,7 +5,7 @@ Market data service with fallback logic and caching.
 from typing import List, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.domain import Index
+from src.models.domain import Index, Stock
 from src.integrations.yahoo_finance import YahooFinanceClient
 from src.integrations.alpha_vantage import AlphaVantageClient
 from src.utils.cache import CacheManager, CacheKeyBuilder, CachePolicies
@@ -229,4 +229,80 @@ class MarketDataService:
             "success": False,
             "error_code": "E003_API_ERROR",
             "error_message": f"無法取得 {symbol} 指數數據，請稍後重試。",
+        }
+
+    async def get_stock(self, stock_code: str) -> dict:
+        """
+        Get stock data with fallback logic.
+        
+        Args:
+            stock_code: Stock code (e.g., "AAPL")
+            
+        Returns:
+            Dict with success status and stock data or error
+        """
+        # Validate stock code format
+        if not stock_code or len(stock_code) > 5:
+            return {
+                "success": False,
+                "error_code": "E007_VALIDATION_ERROR",
+                "error_message": f"無效的股票代碼：{stock_code}",
+            }
+
+        cache_key = CacheKeyBuilder.stock(stock_code)
+        
+        # Check cache first
+        cached_data = await self.cache_manager.get(cache_key)
+        if cached_data:
+            logger.info(f"Returning {stock_code} from cache")
+            return {
+                "success": True,
+                "data": Stock(**cached_data["stock"]),
+                "source": "cache",
+            }
+
+        # Try Yahoo Finance
+        try:
+            logger.info(f"Fetching {stock_code} from Yahoo Finance")
+            stock = await self.yahoo_client.fetch_stock(stock_code)
+            
+            if stock:
+                result = {
+                    "success": True,
+                    "data": stock,
+                    "source": "yahoo_finance",
+                }
+                
+                cache_data = {"stock": stock.dict()}
+                await self.cache_manager.set(
+                    cache_key,
+                    cache_data,
+                    "stock",
+                    CachePolicies.STOCK_TTL_MINUTES,
+                )
+                
+                logger.info(f"Successfully fetched {stock_code}")
+                return result
+                
+        except TimeoutException as e:
+            logger.warning(f"Yahoo Finance timeout for {stock_code}: {e}")
+        except APIError as e:
+            logger.warning(f"Yahoo Finance API error for {stock_code}: {e}")
+        except Exception as e:
+            logger.warning(f"Unexpected error fetching {stock_code}: {e}")
+
+        # Try Alpha Vantage as fallback
+        try:
+            logger.info(f"Falling back to Alpha Vantage for {stock_code}")
+            # Alpha Vantage doesn't have detailed stock data, so we skip it
+            # and go directly to error
+            
+        except Exception as e:
+            logger.warning(f"Fallback failed for {stock_code}: {e}")
+
+        # Both failed
+        return {
+            "success": False,
+            "error_code": "E004_STOCK_NOT_FOUND",
+            "error_message": f"無法找到股票 {stock_code} 的相關數據，請確認代碼是否正確。",
         }
