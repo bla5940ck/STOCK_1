@@ -24,6 +24,7 @@ from src.models.database import QueryTypeEnum, QueryStatusEnum
 from src.handlers.index_handler import handle_index_query
 from src.handlers.stock_handler import handle_stock_query
 from src.handlers.news_handler import handle_news_query
+from src.handlers.tw_stock_handler import handle_tw_stock_query
 
 logger = get_logger(__name__)
 
@@ -222,10 +223,49 @@ class WebhookEventHandler:
 
         logger.info(f"Postback from {user_id}: {postback_data}")
 
-        # TODO: Handle Taiwan stock lookup postback
-        # This will be implemented in Phase 6
+        if not postback_data:
+            logger.debug("Empty postback data")
+            return None
 
-        return None
+        # Parse postback data format: "action=query&code=AAPL"
+        try:
+            params = {}
+            for param in postback_data.split("&"):
+                if "=" in param:
+                    key, value = param.split("=", 1)
+                    params[key] = value
+
+            action = params.get("action", "")
+            us_code = params.get("code", "")
+
+            # Handle Taiwan stock query action
+            if action == "tw_stock_query" and us_code:
+                logger.info(f"Taiwan stock query postback for {us_code}")
+                
+                result = await handle_tw_stock_query(self.db, us_code)
+                
+                await self.log_query(
+                    user_id=user_id,
+                    query_text=us_code,
+                    query_type="tw_stock",
+                    status="success" if result.get("success") else "failed",
+                    error_message=result.get("error_message"),
+                )
+                
+                return result.get("message")
+
+            elif action == "skip":
+                # User clicked "skip" button - don't respond
+                logger.info(f"User {user_id} skipped Taiwan stock query")
+                return None
+
+            else:
+                logger.warning(f"Unknown postback action: {action}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error processing postback: {e}")
+            return None
 
     async def log_query(
         self,
