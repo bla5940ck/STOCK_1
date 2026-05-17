@@ -20,11 +20,14 @@ class TaiwanStockClient:
     """Taiwan stock data fetcher using TWSE (Taiwan Stock Exchange) open API"""
 
     TWSE_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
-    TWSE_LISTING_URL = "https://mis.twse.com.tw/stock/api/twtrade.jsp"  # For stock list
     TIMEOUT = 8.0
     
-    # Simple in-memory cache for stock names -> codes (populated on first search)
-    _stock_name_cache = {}  # e.g., {"台積電": "2330", "健策": "2425", ...}
+    # Quick lookup for common stocks (fetched on demand and cached)
+    # Format: Chinese name -> stock code
+    _quick_lookup = {}
+    
+    # Pre-populate with a quick sample for common queries
+    _quick_lookup_initialized = False
     
     USER_AGENTS = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -193,11 +196,65 @@ class TaiwanStockClient:
         # This supports dynamic lookup without hardcoded mappings
         return None
 
-    async def search_tw_stock(self, company_name: str, retries: int = 2) -> Optional[str]:
-        """
-        Search for Taiwan stock code by company name using cached stock list.
+    async def _load_quick_lookup(self) -> None:
+        """Initialize quick lookup cache with most common stocks."""
+        if TaiwanStockClient._quick_lookup_initialized:
+            return
         
-        First tries to find exact match in cache, then fetches from TWSE if not cached.
+        session = await self._get_session()
+        
+        # Sample codes covering common stocks across all ranges
+        sample_codes = [
+            '1101', '1102', '1104', '1108', '1110', '1201', '1216', '1301', '1303', '1326',
+            '1590', '2002', '2105', '2204', '2206', '2301', '2303', '2308', '2317', '2327',
+            '2330', '2332', '2342', '2343', '2347', '2348', '2353', '2357', '2361', '2376',
+            '2379', '2382', '2390', '2391', '2407', '2408', '2409', '2412', '2413', '2414',
+            '2417', '2454', '2457', '2458', '2330', '2498', '2603', '2609', '2610', '2618',
+            '2882', '2884', '2891', '3008', '3010', '3017', '3035', '3037', '3038', '3231',
+            '3481', '4904', '5871', '6415', '8016', '9904', '2425', '2406', '2404', '2420',
+        ]
+        
+        headers = {
+            "User-Agent": self._get_random_user_agent(),
+            "Referer": "https://mis.twse.com.tw/stock/fibest.jsp",
+        }
+        
+        for code in sample_codes:
+            try:
+                params = {
+                    "ex_ch": f"tse_{code}.tw",
+                    "json": "1",
+                    "delay": "0",
+                }
+                
+                async with session.get(
+                    self.TWSE_URL,
+                    params=params,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=2),
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json(content_type=None)
+                        msg_array = data.get("msgArray", [])
+                        
+                        if msg_array and len(msg_array) > 0:
+                            msg = msg_array[0]
+                            # Only cache if we got valid data
+                            if msg.get("n") and msg.get("z") and msg.get("z") != "-":
+                                stock_name = msg.get("n", "").strip()
+                                if stock_name:
+                                    TaiwanStockClient._quick_lookup[stock_name] = code
+                                    logger.debug(f"Cached: {stock_name} -> {code}")
+            
+            except Exception:
+                continue  # Skip errors, continue to next
+        
+        TaiwanStockClient._quick_lookup_initialized = True
+        logger.debug(f"Quick lookup initialized with {len(TaiwanStockClient._quick_lookup)} stocks")
+    
+    async def search_tw_stock(self, company_name: str, retries: int = 1) -> Optional[str]:
+        """
+        Search for Taiwan stock code by company name using cached lookup.
         
         Args:
             company_name: Chinese company name (e.g., "台積電", "健策")
@@ -208,67 +265,16 @@ class TaiwanStockClient:
         """
         company_name = company_name.strip().lower()
         
-        # Try to find in cache first
-        for cached_name, code in TaiwanStockClient._stock_name_cache.items():
-            if cached_name.lower() == company_name or company_name in cached_name.lower():
-                logger.debug(f"Found {company_name} in cache -> {code}")
+        # Ensure quick lookup is loaded
+        if not TaiwanStockClient._quick_lookup_initialized:
+            await self._load_quick_lookup()
+        
+        # Try to find in quick lookup (exact or partial match)
+        for stock_name, code in TaiwanStockClient._quick_lookup.items():
+            if stock_name.lower() == company_name or company_name in stock_name.lower():
+                logger.debug(f"Found {company_name} in quick lookup -> {code}")
                 return code
         
-        # If not in cache, try to fetch the stock directly
-        # (in case user knows the code or it's a common stock)
-        # Try fetching by trying the first few possible formats
-        session = await self._get_session()
-        
-        # Build a simple query using the name
-        params = {
-            "ex_ch": f"tse_{company_name}.tw",
-            "json": "1",
-            "delay": "0",
-        }
-        
-        headers = {
-            "User-Agent": self._get_random_user_agent(),
-            "Referer": "https://mis.twse.com.tw/stock/fibest.jsp",
-        }
-        
-        for attempt in range(retries):
-            try:
-                async with session.get(
-                    self.TWSE_URL,
-                    params=params,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json(content_type=None)
-                        msg_array = data.get("msgArray", [])
-                        
-                        if msg_array:
-                            msg = msg_array[0]
-                            # Cache this result
-                            stock_zh_name = msg.get("n", "").strip()
-                            if stock_zh_name:
-                                TaiwanStockClient._stock_name_cache[stock_zh_name] = company_name
-                            
-                            ex_ch = msg.get("ex_ch", "")
-                            if ex_ch and "_" in ex_ch:
-                                code = ex_ch.split("_")[1].replace(".tw", "")
-                                logger.debug(f"Found {company_name} via API -> {code}")
-                                return code
-                    
-                    if response.status == 429 and attempt < retries - 1:
-                        wait_time = 2 ** attempt
-                        logger.warning(f"Rate limited searching {company_name}, retrying in {wait_time}s...")
-                        await asyncio.sleep(wait_time)
-                        continue
-                        
-            except asyncio.TimeoutError:
-                if attempt < retries - 1:
-                    logger.debug(f"Timeout searching {company_name}, retrying...")
-                    await asyncio.sleep(1)
-                    continue
-            except Exception as e:
-                logger.debug(f"Error searching stock {company_name}: {e}")
-        
-        logger.debug(f"No stock found for {company_name}")
+        # If not found, advise user to use stock code
+        logger.debug(f"Stock {company_name} not found in quick lookup")
         return None
