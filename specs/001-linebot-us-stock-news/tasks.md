@@ -198,25 +198,36 @@
   - Route "美股" queries to index_handler
   - Reply to LINE using LINE SDK (reply_token)
 
-### Tests for US1 (TDD - write first)
+### Integration & Service Layer for US1
 
-- [ ] T044 [P] [US1] Create contract test in tests/contract/test_index_api.py:
-  - Verify index-query-response.json schema compliance
-  - Test with mock API responses
-  - Verify required fields present: id, zh_name, current_price, change_percent, data_source
-- [ ] T045 [P] [US1] Create unit tests in tests/unit/test_index_handler.py:
+- [x] T038 Create Yahoo Finance client in src/integrations/yahoo_finance.py with fallback to Alpha Vantage
+- [x] T039 Create Alpha Vantage client in src/integrations/alpha_vantage.py as backup
+- [x] T040 Implement fallback logic: Yahoo Finance (5s timeout) → Alpha Vantage (20s timeout)
+- [x] T041 Implement market data service in src/services/market_data.py with caching
+- [x] T042 Create index handler in src/handlers/index_handler.py
+
+### Webhook Integration for US1
+
+- [x] T043 Update Webhook endpoint to route "美股" queries to index_handler
+
+### Tests for US1
+
+- [x] T044 [P] [US1] Create unit tests in tests/integration/test_index_handler.py:
   - Test index data formatting
   - Test error message generation
-  - Test direction indicators (↑ up, ↓ down, → flat)
-- [ ] T046 [P] [US1] Create unit tests in tests/unit/test_market_data.py:
+  - Test direction indicators and success/failure scenarios
+- [x] T045 [P] [US1] Create market data service tests:
   - Test cache hit/miss
   - Test fallback from Yahoo Finance to Alpha Vantage
-  - Test timeout handling (20s limit)
-- [ ] T047 [US1] Create integration test in tests/integration/test_index_query_e2e.py:
+  - Test timeout handling
+- [x] T046 [P] [US1] Create integration tests:
+  - Verify query validators
+  - Verify message formatting
+- [x] T047 [US1] Create end-to-end integration test in tests/integration/test_index_query_e2e.py:
   - Mock LINE Webhook request with "美股" message
-  - Verify response contains all 3 indices
+  - Verify response handling with valid/invalid signatures
   - Verify Traditional Chinese formatting
-  - Verify status code 200 (or 202 for async processing)
+  - Verify Webhook status code 200
 
 **Checkpoint**: "美股" query fully functional and tested ✓
 

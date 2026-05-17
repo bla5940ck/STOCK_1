@@ -7,6 +7,7 @@ import hashlib
 import base64
 import json
 import uuid
+import aiohttp
 from typing import Optional, Dict, Any
 from datetime import datetime
 from fastapi import Request, HTTPException, Depends
@@ -16,9 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import get_settings
 from src.exceptions import SignatureError
 from src.utils.logger import get_logger
+from src.utils.validators import validate_query_text, is_index_keyword
 from src.db.database import get_db
 from src.db.repositories import QueryLogRepository
 from src.models.database import QueryTypeEnum, QueryStatusEnum
+from src.handlers.index_handler import handle_index_query
 
 logger = get_logger(__name__)
 
@@ -125,14 +128,46 @@ class WebhookEventHandler:
         message_type = message.get("type")
         text = message.get("text", "").strip()
 
-        if not text:
+        if not text or message_type != "text":
             return None
 
         logger.info(f"Message from {user_id}: {text}")
 
-        # TODO: Route to appropriate handler based on query type
-        # This will be implemented in Phase 3-4 handlers
+        try:
+            # Validate and detect query type
+            query_text = validate_query_text(text)
+        except Exception as e:
+            logger.warning(f"Query validation failed: {e}")
+            await self.log_query(
+                user_id=user_id,
+                query_text=text,
+                query_type="unknown",
+                status="failed",
+                error_message=str(e)
+            )
+            return None
 
+        # Route based on query type
+        if is_index_keyword(query_text):
+            result = await handle_index_query(self.db)
+            
+            await self.log_query(
+                user_id=user_id,
+                query_text=query_text,
+                query_type="index",
+                status="success" if result.get("success") else "failed",
+                error_message=result.get("error_message"),
+            )
+            
+            return result.get("message")
+        
+        # TODO: Route stock and news queries (Phase 4)
+        # elif detect_query_type(query_text) == "stock":
+        #     return await handle_stock_query(self.db, query_text)
+        # elif detect_query_type(query_text) == "news":
+        #     return await handle_news_query(self.db, query_text)
+
+        logger.debug(f"Unknown query type for: {query_text}")
         return None
 
     async def process_postback_event(self, event: Dict[str, Any]) -> Optional[str]:
@@ -179,6 +214,57 @@ class WebhookEventHandler:
             logger.error(f"Failed to log query: {e}")
             await self.db.rollback()
 
+    async def send_reply_message(
+        self, reply_token: str, text: str
+    ) -> bool:
+        """
+        Send reply message to LINE API.
+        
+        Args:
+            reply_token: Reply token from LINE
+            text: Message text to send
+            
+        Returns:
+            True if successful
+        """
+        settings = get_settings()
+        url = "https://api.line.biz/v2/bot/message/reply"
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {settings.LINE_CHANNEL_ACCESS_TOKEN}",
+        }
+        
+        data = {
+            "replyToken": reply_token,
+            "messages": [
+                {
+                    "type": "text",
+                    "text": text,
+                }
+            ]
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=data,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as response:
+                    if response.status == 200:
+                        logger.info(f"Successfully sent reply message")
+                        return True
+                    else:
+                        logger.error(
+                            f"Failed to send reply message: {response.status}"
+                        )
+                        return False
+        except Exception as e:
+            logger.error(f"Error sending reply message: {e}")
+            return False
+
     async def handle_webhook(self, payload: Dict[str, Any]) -> JSONResponse:
         """
         Handle LINE Webhook payload.
@@ -194,7 +280,6 @@ class WebhookEventHandler:
 
         logger.info(f"Webhook received with {len(events)} events")
 
-        responses = []
         for event in events:
             event_type = event.get("type")
             reply_token = event.get("replyToken")
@@ -211,16 +296,11 @@ class WebhookEventHandler:
                 elif event_type == "unfollow":
                     logger.info(f"User {event.get('source', {}).get('userId')} unfollowed bot")
 
-                # Store response for delivery
+                # Send reply to LINE if we have a message
                 if response_text and reply_token:
-                    responses.append({
-                        "reply_token": reply_token,
-                        "text": response_text
-                    })
+                    await self.send_reply_message(reply_token, response_text)
 
             except Exception as e:
                 logger.error(f"Error processing event: {e}")
-
-        # TODO: Send responses to LINE API (T043)
 
         return JSONResponse(status_code=200, content={"message": "OK"})
