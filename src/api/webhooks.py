@@ -25,6 +25,7 @@ from src.handlers.index_handler import handle_index_query
 from src.handlers.stock_handler import handle_stock_query
 from src.handlers.news_handler import handle_news_query
 from src.handlers.tw_stock_handler import handle_tw_stock_query
+from src.handlers.tw_stock_search_handler import handle_tw_stock_search
 
 logger = get_logger(__name__)
 
@@ -150,6 +151,12 @@ class WebhookEventHandler:
             )
             return None
 
+        # Special person Easter eggs
+        if query_text.strip() == "盧世浚":
+            return "低能股票，不要投資"
+        elif query_text.strip() == "李泓毅":
+            return "垃圾東西，不要投資"
+
         # Route based on query type
         if is_index_keyword(query_text):
             # Index query (美股, 指數)
@@ -191,6 +198,37 @@ class WebhookEventHandler:
                 error_msg = result.get("error_message", "查询失败，请稍后重试")
                 return f"❌ {error_msg}"
         
+        elif detect_query_type(query_text) == "tw_stock":
+            # Taiwan stock query (台股, 台積電, 2330, etc.)
+            try:
+                result = await handle_tw_stock_search(self.db, query_text)
+                
+                await self.log_query(
+                    user_id=user_id,
+                    query_text=query_text,
+                    query_type="tw_stock",
+                    status="success" if result.get("success") else "error",
+                    error_message=result.get("error_message"),
+                )
+                
+                # Return message or error message
+                message = result.get("message")
+                if message:
+                    return message
+                else:
+                    error_msg = result.get("error_message", "查询失败，请稍后重试")
+                    return f"❌ {error_msg}"
+            except Exception as e:
+                logger.warning(f"Taiwan stock query validation failed: {e}")
+                await self.log_query(
+                    user_id=user_id,
+                    query_text=query_text,
+                    query_type="tw_stock",
+                    status="error",
+                    error_message=str(e)
+                )
+                return f"❌ 台股查詢錯誤：{str(e)}"
+        
         elif detect_query_type(query_text) == "stock":
             # Stock query (AAPL, TSLA, etc.)
             try:
@@ -231,16 +269,10 @@ class WebhookEventHandler:
             "• 股票代碼（如: AAPL, TSLA）\n"
             "• 美股指數（輸入: 美股, 指數）\n"
             "• 新聞（輸入: 新聞）\n"
-            "• 台股（輸入: 台股）\n\n"
-            "例如: AAPL、美股、新聞"
+            "• 台股（輸入: 台股、台積電、2330）\n\n"
+            "例如: AAPL、美股、新聞、台積電"
         )
-        await self.log_query(
-            user_id=user_id,
-            query_text=query_text,
-            query_type="help",
-            status="success",
-            error_message=None,
-        )
+        # Don't log help queries as they are not a recognized query type
         return help_message
 
     async def process_postback_event(self, event: Dict[str, Any]) -> Optional[str]:

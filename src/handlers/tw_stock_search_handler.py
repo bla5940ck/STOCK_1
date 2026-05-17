@@ -1,0 +1,84 @@
+"""
+Handler for Taiwan stock direct queries (e.g., 台積電, 2330).
+"""
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.integrations.tw_stock_integration import TaiwanStockClient
+from src.services.news_service import NewsService
+from src.utils.formatters import format_tw_stock_price_message, format_error_message
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+async def handle_tw_stock_search(db: AsyncSession, query: str) -> dict:
+    """
+    Handle Taiwan stock search by name or code.
+    
+    Fetches Taiwan stock price data and related news articles.
+    
+    Args:
+        db: Database session
+        query: Stock code (e.g., "2330") or name (e.g., "台積電")
+        
+    Returns:
+        Dict with:
+        - 'success': bool
+        - 'message': str (formatted message for LINE)
+        - 'error_code': str (on failure)
+    """
+    tw_client = TaiwanStockClient()
+    news_service = NewsService(db)
+    
+    try:
+        # Resolve stock code from query
+        from src.integrations.tw_stock_integration import TaiwanStockClient as TWClient
+        stock_code = TWClient.resolve_tw_stock_code(query)
+        
+        if not stock_code:
+            logger.warning(f"Taiwan stock not found: {query}")
+            return {
+                "success": False,
+                "error_code": "E004_STOCK_NOT_FOUND",
+                "message": format_error_message("E004_STOCK_NOT_FOUND", f"找不到台股標的：{query}"),
+            }
+
+        # Fetch stock data
+        stock_data = await tw_client.fetch_tw_stock(stock_code)
+        
+        if not stock_data:
+            logger.warning(f"Failed to fetch Taiwan stock data: {stock_code}")
+            return {
+                "success": False,
+                "error_code": "E003_API_ERROR",
+                "message": format_error_message("E003_API_ERROR", f"無法取得台股數據：{stock_code}"),
+            }
+
+        # Fetch related news (company name in both English and Chinese)
+        company_name = stock_data.get("zh_name", stock_code)
+        news_result = await news_service.fetch_related_news(company_name, limit=3)
+        news_articles = news_result.get("data", []) if news_result.get("success") else []
+
+        # Format message for LINE
+        message = format_tw_stock_price_message(stock_data, news_articles)
+
+        logger.info(f"Taiwan stock query successful for {stock_code}")
+
+        return {
+            "success": True,
+            "message": message,
+            "stock_code": stock_code,
+            "news_count": len(news_articles),
+        }
+
+    except Exception as e:
+        logger.error(f"Unexpected error in Taiwan stock search handler: {e}")
+        return {
+            "success": False,
+            "error_code": "E999_INTERNAL_ERROR",
+            "message": format_error_message("E999_INTERNAL_ERROR", "系統內部錯誤，請稍後重試。"),
+        }
+    finally:
+        await tw_client.close()
+        await news_service.close()

@@ -110,6 +110,38 @@ def is_news_keyword(text: str) -> bool:
     return text.lower() in keywords
 
 
+def is_tw_stock_keyword(text: str) -> bool:
+    """Check if text is Taiwan stock query keyword"""
+    keywords = ["台股", "tw", "taiwan", "台灣股票"]
+    text_lower = text.lower().strip()
+    
+    # Direct keyword match
+    if text_lower in keywords:
+        return True
+    
+    # Check if it's a Taiwan stock name or code
+    if is_tw_stock_code_or_name(text_lower):
+        return True
+    
+    return False
+
+
+def is_tw_stock_code_or_name(text: str) -> bool:
+    """
+    Check if text is a Taiwan stock code or company name.
+    
+    Args:
+        text: Stock code (e.g., "2330") or company name (e.g., "台積電")
+        
+    Returns:
+        True if it's a valid Taiwan stock code or name
+    """
+    from src.integrations.tw_stock_integration import TaiwanStockClient
+    
+    resolved = TaiwanStockClient.resolve_tw_stock_code(text)
+    return resolved is not None
+
+
 def detect_query_type(text: str) -> Optional[str]:
     """
     Detect query type from user text.
@@ -118,7 +150,7 @@ def detect_query_type(text: str) -> Optional[str]:
         text: User input text
         
     Returns:
-        Query type: "index", "stock", "news", or None if not recognized
+        Query type: "index", "stock", "news", "tw_stock", or None if not recognized
     """
     text_lower = text.lower().strip()
 
@@ -128,7 +160,11 @@ def detect_query_type(text: str) -> Optional[str]:
     if is_news_keyword(text_lower):
         return "news"
 
-    # Try to validate as stock code
+    # Check for Taiwan stock before US stock
+    if is_tw_stock_keyword(text_lower):
+        return "tw_stock"
+
+    # Try to validate as US stock code
     try:
         validate_stock_code(text_lower)
         return "stock"

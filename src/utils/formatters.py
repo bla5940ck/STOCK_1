@@ -5,10 +5,281 @@ Message formatting utilities for Traditional Chinese output.
 from datetime import datetime
 from typing import List, Optional
 from decimal import Decimal
+import re
+from html import unescape
+from urllib.parse import urlparse
 from src.models.domain import (
     Index, Stock, NewsArticle, TaiwanStock, 
     IndexQueryResponse, StockQueryResponse, NewsQueryResponse
 )
+from src.utils.valuation import get_valuation_assessment
+from src.utils.stock_fundamentals import build_valuation_analysis
+
+
+def clean_html(text: str) -> str:
+    """
+    Clean HTML tags and entities from text.
+    
+    Args:
+        text: Text containing HTML
+        
+    Returns:
+        Clean text without HTML tags
+    """
+    # Remove HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    # Unescape HTML entities
+    text = unescape(text)
+    # Remove extra whitespace
+    text = ' '.join(text.split())
+    return text
+
+
+def extract_domain(url: str) -> str:
+    """
+    Extract domain name from URL.
+    
+    Args:
+        url: Full URL (e.g., https://www.example.com/article)
+        
+    Returns:
+        Domain name (e.g., example.com)
+    """
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc
+        # Remove www. prefix if present
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        return domain
+    except Exception:
+        return url
+
+
+def translate_news_text(text: str) -> str:
+    """
+    Translate English news text to Chinese using keyword mapping.
+    
+    Args:
+        text: English news text
+        
+    Returns:
+        Translated Chinese text
+    """
+    if not text:
+        return text
+    
+    # Clean HTML first
+    text = clean_html(text)
+    
+    # Company mapping
+    companies = {
+        "apple": "蘋果",
+        "microsoft": "微軟",
+        "google": "谷歌",
+        "alphabet": "字母表",
+        "amazon": "亞馬遜",
+        "tesla": "特斯拉",
+        "meta": "Meta",
+        "nvidia": "英偉達",
+        "jpmorgan": "摩根大通",
+        "jpm": "摩根大通",
+        "visa": "Visa",
+        "walmart": "沃爾瑪",
+        "coca-cola": "可口可樂",
+        "mcdonald's": "麥當勞",
+        "mastercard": "萬事達卡",
+    }
+    
+    # Action/Verb mapping
+    actions = {
+        "announces": "宣佈",
+        "announced": "宣佈",
+        "reported": "報告",
+        "reports": "報告",
+        "beat": "超越",
+        "beats": "超越",
+        "misses": "未達",
+        "acquires": "併購",
+        "acquired": "併購",
+        "launches": "推出",
+        "launched": "推出",
+        "raises": "提高",
+        "raised": "提高",
+        "cuts": "下調",
+        "lays off": "裁員",
+        "hires": "招聘",
+        "surges": "飆升",
+        "plummets": "暴跌",
+        "gains": "上漲",
+        "falls": "下跌",
+    }
+    
+    # Quality/Descriptor mapping
+    descriptors = {
+        "strong": "強勁",
+        "weak": "疲弱",
+        "record": "創紀錄",
+        "highest": "最高",
+        "lowest": "最低",
+        "unexpected": "意外",
+        "better than expected": "好於預期",
+        "worse than expected": "差於預期",
+        "better-than-expected": "好於預期",
+        "worse-than-expected": "差於預期",
+    }
+    
+    # Business term mapping
+    business_terms = {
+        "earnings": "盈利",
+        "revenue": "營收",
+        "profit": "利潤",
+        "loss": "虧損",
+        "dividend": "股息",
+        "stock": "股票",
+        "share": "股份",
+        "price": "價格",
+        "ipo": "首次公開募股",
+        "acquisition": "併購",
+        "merger": "合併",
+        "partnership": "合作",
+        "deal": "交易",
+        "quarterly": "季度",
+        "annual": "年度",
+        "sales": "銷售",
+        "growth": "增長",
+        "decline": "下降",
+        "market": "市場",
+        "sector": "板塊",
+        "product": "產品",
+        "service": "服務",
+        "customer": "客戶",
+        "employee": "員工",
+        "supply chain": "供應鏈",
+        "innovation": "創新",
+        "q1": "第一季度",
+        "q2": "第二季度",
+        "q3": "第三季度",
+        "q4": "第四季度",
+    }
+    
+    # Product mapping
+    products = {
+        "iphone": "iPhone",
+        "ipad": "iPad",
+        "mac": "Mac",
+        "windows": "Windows",
+        "azure": "Azure",
+        "aws": "AWS",
+        "cloud": "雲服務",
+        "ai": "人工智能",
+        "5g": "5G",
+        "chip": "晶片",
+    }
+    
+    # Process: Replace keywords with Chinese
+    result = text.lower()
+    
+    # Replace multi-word phrases first
+    multi_word_terms = [
+        ("better-than-expected", "好於預期"),
+        ("worse-than-expected", "差於預期"),
+        ("better than expected", "好於預期"),
+        ("worse than expected", "差於預期"),
+        ("supply chain", "供應鏈"),
+        ("stock split", "股票分割"),
+        ("product launch", "產品發布"),
+        ("lay off", "裁員"),
+        ("lays off", "裁員"),
+    ]
+    
+    for english, chinese in multi_word_terms:
+        result = result.replace(english, f" {chinese} ")
+    
+    # Replace single words
+    all_mappings = {**companies, **actions, **descriptors, **business_terms, **products}
+    for english, chinese in all_mappings.items():
+        # Use word boundaries to avoid partial matches
+        pattern = r'\b' + re.escape(english) + r'\b'
+        result = re.sub(pattern, chinese, result, flags=re.IGNORECASE)
+    
+    # Clean up extra spaces
+    result = ' '.join(result.split())
+    
+    return result
+
+
+def generate_chinese_summary(title: str, summary: str) -> str:
+    """
+    Generate a quick Chinese translation/summary of news headline and content.
+    
+    Args:
+        title: News title (in English)
+        summary: News summary (in English)
+        
+    Returns:
+        Quick Chinese summary
+    """
+    text = (title + " " + summary).lower()
+    
+    # Company mapping
+    companies = {
+        "apple": "蘋果",
+        "microsoft": "微軟",
+        "google": "谷歌",
+        "amazon": "亞馬遜",
+        "tesla": "特斯拉",
+        "meta": "Meta",
+        "nvidia": "英偉達",
+        "jpmorgan": "摩根大通",
+        "visa": "Visa",
+        "walmart": "沃爾瑪",
+    }
+    
+    # Event keywords
+    events = {
+        "earnings": "盈利",
+        "revenue": "營收",
+        "profit": "利潤",
+        "beat": "超越預期",
+        "miss": "未達預期",
+        "acquisition": "併購",
+        "merger": "合併",
+        "ipo": "上市",
+        "stock split": "股票分割",
+        "dividend": "股息",
+        "layoff": "裁員",
+        "hiring": "招聘",
+        "product launch": "新品發布",
+        "innovation": "創新",
+        "partnership": "合作",
+    }
+    
+    # Generate summary
+    company_found = None
+    event_found = None
+    
+    for company, zh_name in companies.items():
+        if company in text:
+            company_found = zh_name
+            break
+    
+    for event, zh_event in events.items():
+        if event in text:
+            event_found = zh_event
+            break
+    
+    # Build summary
+    if company_found and event_found:
+        return f"{company_found}{event_found}相關新聞"
+    elif company_found:
+        return f"{company_found}相關新聞"
+    elif event_found:
+        return f"{event_found}相關新聞"
+    else:
+        # Extract first few meaningful words
+        words = title.split()[:3]
+        return f"{' '.join(words)}..."
 
 
 def truncate_summary(text: str, max_length: int = 150) -> str:
@@ -22,6 +293,9 @@ def truncate_summary(text: str, max_length: int = 150) -> str:
     Returns:
         Truncated text
     """
+    # Clean HTML first
+    text = clean_html(text)
+    
     if len(text) <= max_length:
         return text
 
@@ -74,9 +348,21 @@ def format_index_message(indices: List[Index]) -> str:
         lines.append("")
 
     for idx in indices:
-        # Build line: • Name: Price Direction Change%
-        line = f"• {idx.zh_name}: {idx.current_price} {idx.direction}{idx.change_percent}%"
-        line += f" (前收: {idx.previous_close})"
+        # Build line: • Name: Price Color Direction Change% (with 2 decimal places)
+        change_percent_str = f"{idx.change_percent:.2f}"
+        
+        if idx.change_percent > 0:
+            color_indicator = "🔴"  # Red for up
+            direction = "↑"
+        elif idx.change_percent < 0:
+            color_indicator = "🟢"  # Green for down
+            direction = "↓"
+        else:
+            color_indicator = "⚪"  # White for no change
+            direction = "→"
+        
+        line = f"• {idx.zh_name}: {idx.current_price} {color_indicator}{direction}{change_percent_str}%"
+        line += f" (昨晚: {idx.previous_close})"
         lines.append(line)
 
     # Add footer with data source
@@ -100,7 +386,7 @@ def format_stock_message(stock: Stock, news_articles: Optional[List[NewsArticle]
         
     Example:
         📈 AAPL - 蘋果公司
-        現價: $180.50 ↑0.70% (前收: $179.25)
+        現價: $180.50 🔴↑0.70% (前收: $179.25)
         市值: $2,800B | PE比: 28.5 | 股息: 0.45%
         
         📰 相關新聞:
@@ -118,10 +404,39 @@ def format_stock_message(stock: Stock, news_articles: Optional[List[NewsArticle]
     lines.append(f"📈 {stock.code} - {company_name}")
     lines.append("")
 
-    # Price info
-    price_line = f"現價: ${stock.current_price} {stock.direction}{stock.change_percent}% "
+    # Price info with color indicator (red for up, green for down)
+    change_percent_str = f"{stock.change_percent:.2f}"  # Only 2 decimal places
+    
+    if stock.change_percent > 0:
+        color_indicator = "🔴"  # Red for up
+        direction = "↑"
+    elif stock.change_percent < 0:
+        color_indicator = "🟢"  # Green for down
+        direction = "↓"
+    else:
+        color_indicator = "⚪"  # White for no change
+        direction = "→"
+    
+    price_line = f"現價: ${stock.current_price} {color_indicator}{direction}{change_percent_str}% "
     price_line += f"(前收: ${stock.previous_close})"
     lines.append(price_line)
+
+    # Market status indicator for US stocks
+    from src.utils.market_hours import is_us_market_open
+    market_status = is_us_market_open()
+    lines.append(market_status['display_status'])
+
+    # Price range info (open, high, low)
+    price_range_parts = []
+    if stock.open_price:
+        price_range_parts.append(f"開盤: ${stock.open_price}")
+    if stock.high_price:
+        price_range_parts.append(f"最高: ${stock.high_price}")
+    if stock.low_price:
+        price_range_parts.append(f"最低: ${stock.low_price}")
+    
+    if price_range_parts:
+        lines.append(" | ".join(price_range_parts))
 
     # Additional info
     info_parts = []
@@ -135,6 +450,11 @@ def format_stock_message(stock: Stock, news_articles: Optional[List[NewsArticle]
     if info_parts:
         lines.append(" | ".join(info_parts))
 
+    # Comprehensive valuation analysis based on P/E ratios
+    lines.append("")
+    valuation_analysis = build_valuation_analysis(stock.code, Decimal(str(stock.current_price)))
+    lines.append(valuation_analysis)
+
     # News section
     if news_articles:
         lines.append("")
@@ -142,16 +462,25 @@ def format_stock_message(stock: Stock, news_articles: Optional[List[NewsArticle]
         lines.append("")
 
         for i, article in enumerate(news_articles[:5], 1):
-            lines.append(f"• {article.title}")
-            summary = truncate_summary(article.summary, 150)
-            lines.append(f"  {summary}")
+            # Translate title to Chinese
+            zh_title = translate_news_text(article.title)
+            lines.append(f"• {zh_title}")
             
-            source_date = f"{article.source}"
+            # Translate summary to Chinese
+            summary = truncate_summary(article.summary, 150)
+            zh_summary = translate_news_text(summary)
+            lines.append(f"  {zh_summary}")
+            
+            source_date = f"來源: {article.source}"
             if article.published_at:
                 date_str = article.published_at.strftime("%Y-%m-%d")
                 source_date += f" | {date_str}"
             
-            lines.append(f"  🔗 {source_date}")
+            lines.append(f"  {source_date}")
+            
+            if article.url:
+                # Show full URL for clicking
+                lines.append(f"  🔗 {article.url}")
             
             if i < len(news_articles):
                 lines.append("")
@@ -179,20 +508,30 @@ def format_news_message(articles: List[NewsArticle]) -> str:
         • 聯準會宣佈升息決定
           美國聯邦準備委員會在今日宣佈升息 0.5%，以控制通脹...
           路透社 | 2026-05-17
+          https://example.com/news
     """
     lines = ["📰 最新美國經濟新聞", ""]
 
     for i, article in enumerate(articles[:5], 1):
-        lines.append(f"• {article.title}")
+        # Translate title to Chinese
+        zh_title = translate_news_text(article.title)
+        lines.append(f"• {zh_title}")
+        
+        # Translate summary to Chinese
         summary = truncate_summary(article.summary, 150)
-        lines.append(f"  {summary}")
+        zh_summary = translate_news_text(summary)
+        lines.append(f"  {zh_summary}")
         
         source_date = f"{article.source}"
         if article.published_at:
             date_str = article.published_at.strftime("%Y-%m-%d")
             source_date += f" | {date_str}"
         
-        lines.append(f"  🔗 {source_date}")
+        lines.append(f"  {source_date}")
+        
+        if article.url:
+            # Show full URL for clicking
+            lines.append(f"  🔗 {article.url}")
         
         if i < len(articles):
             lines.append("")
@@ -299,4 +638,113 @@ def format_suggestion_message() -> str:
         "",
         "請輸入以上任一指令開始查詢。"
     ]
+    return "\n".join(lines)
+
+
+def format_tw_stock_price_message(stock_data: dict, news_articles: Optional[List[NewsArticle]] = None) -> str:
+    """
+    Format Taiwan stock data with optional news articles.
+    
+    Args:
+        stock_data: Dict with Taiwan stock info from integration
+        news_articles: Optional list of NewsArticle objects
+        
+    Returns:
+        Formatted message
+        
+    Example:
+        🇹🇼 2330 - 台積電
+        現價: ₩2500.00 🔴↑0.80% (前收: ₩2480.00)
+        開盤: ₩2490.00 | 最高: ₩2510.00 | 最低: ₩2475.00
+        
+        📰 相關新聞:
+        • 台積電第二季度盈利超預期
+          台積電公佈第二季度財報，盈利超過市場預期...
+          來源: 工商時報 | 2026-05-17
+    """
+    from datetime import datetime
+    
+    lines = []
+    
+    # Header
+    code = stock_data.get("code", "?")
+    zh_name = stock_data.get("zh_name", code)
+    lines.append(f"🇹🇼 {code} - {zh_name}")
+    lines.append("")
+    
+    # Price info
+    current_price = stock_data.get("current_price", 0)
+    previous_close = stock_data.get("previous_close", 0)
+    change_percent = stock_data.get("change_percent", 0)
+    
+    # Color indicator
+    change_percent_str = f"{float(change_percent):.2f}"
+    if change_percent > 0:
+        color_indicator = "🔴"
+        direction = "↑"
+    elif change_percent < 0:
+        color_indicator = "🟢"
+        direction = "↓"
+    else:
+        color_indicator = "⚪"
+        direction = "→"
+    
+    def fmt_price(val) -> str:
+        """Format price with 2 decimal places with NT$ prefix."""
+        try:
+            return f"NT${float(val):.2f}"
+        except (TypeError, ValueError):
+            return str(val)
+
+    lines.append(f"現價: {fmt_price(current_price)}")
+    lines.append(f"漲幅: {color_indicator}{direction}{change_percent_str}%")
+    lines.append(f"前收: {fmt_price(previous_close)}")
+    lines.append(f"開盤: {fmt_price(stock_data.get('open_price', 0))}")
+    lines.append(f"最高: {fmt_price(stock_data.get('high_price', 0))}")
+    lines.append(f"最低: {fmt_price(stock_data.get('low_price', 0))}")
+    
+    # Trading volume
+    volume = stock_data.get("volume", 0)
+    if volume > 0:
+        volume_str = f"{volume:,.0f}" if volume >= 1000 else str(volume)
+        lines.append(f"成交量: {volume_str}")
+    
+    # Comprehensive valuation analysis based on P/E ratios
+    lines.append("")
+    valuation_analysis = build_valuation_analysis(code, current_price)
+    lines.append(valuation_analysis)
+    
+    # News section
+    if news_articles:
+        lines.append("")
+        lines.append("📰 相關新聞:")
+        lines.append("")
+        
+        for i, article in enumerate(news_articles[:5], 1):
+            # Translate title to Chinese
+            zh_title = translate_news_text(article.title)
+            lines.append(f"• {zh_title}")
+            
+            # Translate summary to Chinese
+            summary = truncate_summary(article.summary, 150)
+            zh_summary = translate_news_text(summary)
+            lines.append(f"  {zh_summary}")
+            
+            source_date = f"來源: {article.source}"
+            if article.published_at:
+                date_str = article.published_at.strftime("%Y-%m-%d")
+                source_date += f" | {date_str}"
+            
+            lines.append(f"  {source_date}")
+            
+            if article.url:
+                lines.append(f"  🔗 {article.url}")
+            
+            if i < len(news_articles):
+                lines.append("")
+    
+    # Data source
+    lines.append("")
+    lines.append(f"📊 資料來源：台灣股市")
+    
     return "\n".join(lines)

@@ -22,6 +22,25 @@ INDICES = {
     "^SOX": "費城半導體指數",
 }
 
+# Popular US stocks Chinese name mapping
+STOCK_NAMES = {
+    "AAPL": {"name": "Apple Inc.", "zh_name": "蘋果公司"},
+    "MSFT": {"name": "Microsoft Corporation", "zh_name": "微軟公司"},
+    "GOOGL": {"name": "Alphabet Inc.", "zh_name": "字母表公司"},
+    "AMZN": {"name": "Amazon.com Inc.", "zh_name": "亞馬遜公司"},
+    "TSLA": {"name": "Tesla Inc.", "zh_name": "特斯拉公司"},
+    "META": {"name": "Meta Platforms Inc.", "zh_name": "Meta公司"},
+    "NVDA": {"name": "NVIDIA Corporation", "zh_name": "英偉達"},
+    "JPM": {"name": "JPMorgan Chase & Co.", "zh_name": "摩根大通"},
+    "V": {"name": "Visa Inc.", "zh_name": "Visa公司"},
+    "WMT": {"name": "Walmart Inc.", "zh_name": "沃爾瑪"},
+    "PG": {"name": "Procter & Gamble Co.", "zh_name": "寶潔公司"},
+    "JNJ": {"name": "Johnson & Johnson", "zh_name": "強生公司"},
+    "MA": {"name": "Mastercard Inc.", "zh_name": "萬事達卡"},
+    "KO": {"name": "The Coca-Cola Company", "zh_name": "可口可樂"},
+    "MCD": {"name": "McDonald's Corporation", "zh_name": "麥當勞"},
+}
+
 
 class AlphaVantageClient:
     """Alpha Vantage API client as backup for Yahoo Finance"""
@@ -252,15 +271,20 @@ class AlphaVantageClient:
                 change_amount = current_price - prev_close
                 change_percent = (change_amount / prev_close * 100) if prev_close > 0 else Decimal("0")
 
+                # Get Chinese name from mapping, fallback to English name
+                stock_info = STOCK_NAMES.get(symbol, {"name": symbol, "zh_name": None})
+
                 return {
                     "code": symbol,
-                    "name": symbol,
+                    "name": stock_info["name"],
+                    "zh_name": stock_info["zh_name"],
                     "current_price": float(current_price),
                     "previous_close": float(prev_close),
                     "change_amount": float(change_amount),
                     "change_percent": float(change_percent),
-                    "high_52w": float(Decimal(str(quote.get("03. high", 0)))),
-                    "low_52w": float(Decimal(str(quote.get("04. low", 0)))),
+                    "open_price": float(Decimal(str(quote.get("02. open", 0)))) or None,
+                    "high_price": float(Decimal(str(quote.get("03. high", 0)))) or None,
+                    "low_price": float(Decimal(str(quote.get("04. low", 0)))) or None,
                     "volume": int(quote.get("06. volume", 0)),
                     "data_source": "alpha_vantage",
                 }

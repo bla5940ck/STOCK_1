@@ -295,18 +295,36 @@ class YahooFinanceClient:
             dividend_yield = detail_data.get("dividendYield", {}).get("raw")
             dividend_yield_decimal = Decimal(str(dividend_yield * 100)) if dividend_yield else None
 
+            # Extract price range
+            open_price = price_data.get("regularMarketOpen", {}).get("raw")
+            open_price_decimal = Decimal(str(open_price)) if open_price else None
+            
+            high_price = price_data.get("regularMarketDayHigh", {}).get("raw")
+            high_price_decimal = Decimal(str(high_price)) if high_price else None
+            
+            low_price = price_data.get("regularMarketDayLow", {}).get("raw")
+            low_price_decimal = Decimal(str(low_price)) if low_price else None
+
             company_name = asset_data.get("longName", symbol)
             sector = asset_data.get("sector")
             industry = asset_data.get("industry")
 
+            # Get Chinese name from mapping
+            from src.integrations.alpha_vantage import STOCK_NAMES
+            stock_info = STOCK_NAMES.get(symbol.upper(), {"name": company_name, "zh_name": None})
+            zh_name = stock_info.get("zh_name")
+
             return Stock(
                 code=symbol.upper(),
                 company_name=company_name,
-                zh_name=None,  # Would need separate translation service
+                zh_name=zh_name,
                 current_price=current_price.quantize(Decimal("0.01")),
                 previous_close=previous_close.quantize(Decimal("0.01")),
                 change_amount=change_amount.quantize(Decimal("0.01")),
                 change_percent=change_percent.quantize(Decimal("0.01")),
+                open_price=open_price_decimal.quantize(Decimal("0.01")) if open_price_decimal else None,
+                high_price=high_price_decimal.quantize(Decimal("0.01")) if high_price_decimal else None,
+                low_price=low_price_decimal.quantize(Decimal("0.01")) if low_price_decimal else None,
                 market_cap_billion=market_cap_billion.quantize(Decimal("0.1")) if market_cap_billion else None,
                 pe_ratio=pe_ratio_decimal.quantize(Decimal("0.01")) if pe_ratio_decimal else None,
                 dividend_yield=dividend_yield_decimal.quantize(Decimal("0.01")) if dividend_yield_decimal else None,

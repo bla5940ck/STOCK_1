@@ -68,7 +68,7 @@ class GoogleNewsClient:
         search_term = self.NEWS_QUERIES.get(query, query)
         params = {
             "q": search_term,
-            "hl": "en",
+            "hl": "zh-TW",
             "gl": "US",
         }
 
@@ -111,7 +111,7 @@ class GoogleNewsClient:
         
         params = {
             "q": stock_code,
-            "hl": "en",
+            "hl": "zh-TW",
             "gl": "US",
         }
 
@@ -213,6 +213,10 @@ class GoogleNewsClient:
             if not title or not summary:
                 return None
 
+            # Clean HTML tags from summary
+            from src.utils.formatters import clean_html
+            summary = clean_html(summary)
+            
             # Truncate summary to 150 characters
             if len(summary) > 150:
                 summary = summary[:147] + "..."

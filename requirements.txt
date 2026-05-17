@@ -19,6 +19,7 @@ psycopg2-binary==2.9.9  # PostgreSQL adapter
 # External APIs
 yfinance==0.2.32
 feedparser==6.0.10
+pytz==2024.1  # Timezone support
 
 # Testing
 pytest==7.4.3

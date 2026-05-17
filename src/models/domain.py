@@ -120,6 +120,9 @@ class Stock(BaseModel):
     previous_close: Decimal = Field(..., ge=0)
     change_amount: Decimal = Field(...)
     change_percent: Decimal = Field(...)
+    open_price: Optional[Decimal] = Field(None, ge=0)
+    high_price: Optional[Decimal] = Field(None, ge=0)
+    low_price: Optional[Decimal] = Field(None, ge=0)
     market_cap_billion: Optional[Decimal] = Field(None, ge=0)
     pe_ratio: Optional[Decimal] = Field(None, ge=0)
     dividend_yield: Optional[Decimal] = Field(None, ge=0)
@@ -148,6 +151,9 @@ class Stock(BaseModel):
                 "previous_close": "179.25",
                 "change_amount": "1.25",
                 "change_percent": "0.70",
+                "open_price": "179.00",
+                "high_price": "181.50",
+                "low_price": "178.75",
                 "market_cap_billion": "2800.0",
                 "pe_ratio": "28.5",
                 "dividend_yield": "0.45",
