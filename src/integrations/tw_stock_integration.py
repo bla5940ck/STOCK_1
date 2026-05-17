@@ -29,6 +29,10 @@ class TaiwanStockClient:
     # Pre-populate with a quick sample for common queries
     _quick_lookup_initialized = False
     
+    # In-memory cache for stock data (persists during session)
+    # Format: stock_code -> {data dict with timestamp}
+    _stock_cache = {}
+    
     USER_AGENTS = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -39,9 +43,22 @@ class TaiwanStockClient:
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session"""
+        """Get or create aiohttp session with optimized settings"""
         if self.session is None:
-            self.session = aiohttp.ClientSession()
+            # Create connector with optimized settings for TWSE API
+            connector = aiohttp.TCPConnector(
+                limit=10,
+                limit_per_host=5,
+                ttl_dns_cache=300,
+                enable_cleanup_closed=True,
+                force_close=False,  # Keep connections alive
+                ssl=True,  # Use default SSL verification
+            )
+            
+            self.session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=aiohttp.ClientTimeout(total=self.TIMEOUT, connect=5, sock_read=10),
+            )
         return self.session
 
     async def close(self):
@@ -57,18 +74,25 @@ class TaiwanStockClient:
     async def fetch_tw_stock(self, symbol: str, retries: int = 3) -> Optional[dict]:
         """
         Fetch Taiwan stock real-time data from TWSE open API.
+        Falls back to cached data if API is unavailable.
         
         Args:
             symbol: Taiwan stock code (e.g., "2330")
             retries: Number of retry attempts
             
         Returns:
-            Dict with stock info or None if failed
+            Dict with stock info or cached data, None if no data available
         """
-        session = await self._get_session()
-        
         # Normalize symbol (remove .TW suffix if present)
         stock_code = symbol.replace(".TW", "").replace(".tw", "")
+        
+        # Check cache first
+        if stock_code in TaiwanStockClient._stock_cache:
+            cached = TaiwanStockClient._stock_cache[stock_code]
+            logger.debug(f"Using cached data for {stock_code} from {cached.get('cached_at')}")
+            return cached.get('data')
+        
+        session = await self._get_session()
         
         # Try TSE first, then OTC
         for market in ("tse", "otc"):
@@ -157,7 +181,17 @@ class TaiwanStockClient:
                             "volume": volume,
                             "data_source": "twse",
                             "currency": "TWD",
+                            "cached_at": datetime.now().isoformat(),
                         }
+                        
+                        # Cache the successful result
+                        TaiwanStockClient._stock_cache[stock_code] = {
+                            "data": result,
+                            "cached_at": datetime.now().isoformat(),
+                        }
+                        logger.debug(f"Cached stock data for {stock_code}")
+                        
+                        return result
                 except asyncio.TimeoutError:
                     if attempt < retries - 1:
                         wait_time = 2 ** attempt
@@ -167,10 +201,22 @@ class TaiwanStockClient:
                     logger.error(f"Timeout fetching Taiwan stock {stock_code} after {retries} retries")
                     break
                 except Exception as e:
-                    logger.error(f"Error fetching Taiwan stock {stock_code}: {e}")
+                    # Retry on connection errors
+                    if attempt < retries - 1:
+                        wait_time = 2 ** attempt
+                        logger.warning(f"Connection error for {stock_code}: {e}, retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    logger.error(f"Error fetching Taiwan stock {stock_code} after {retries} retries: {e}")
                     break
 
-        logger.error(f"Failed to fetch Taiwan stock data for {stock_code}")
+        # If API failed but we have cached data, return it
+        if stock_code in TaiwanStockClient._stock_cache:
+            cached = TaiwanStockClient._stock_cache[stock_code]
+            logger.warning(f"API failed for {stock_code}, returning cached data from {cached.get('cached_at')}")
+            return cached.get('data')
+        
+        logger.error(f"Failed to fetch Taiwan stock data for {stock_code} and no cached data available")
         return None
 
     @staticmethod
