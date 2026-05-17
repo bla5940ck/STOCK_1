@@ -18,32 +18,55 @@ logger = get_logger(__name__)
 
 # Taiwan stock code to name mapping
 TW_STOCK_NAMES = {
-    "2330": {"name": "Taiwan Semiconductor Manufacturing Company", "zh_name": "台積電", "code": "2330"},
+    # 半導體製造
+    "2330": {"name": "Taiwan Semiconductor Manufacturing", "zh_name": "台積電", "code": "2330"},
+    "2303": {"name": "United Microelectronics", "zh_name": "聯電", "code": "2303"},
+    # IC 設計
     "2454": {"name": "MediaTek", "zh_name": "聯發科", "code": "2454"},
-    "2317": {"name": "Acer", "zh_name": "宏碁", "code": "2317"},
+    "2379": {"name": "Realtek Semiconductor", "zh_name": "瑞昱", "code": "2379"},
+    "2408": {"name": "Nanya Technology", "zh_name": "南亞科", "code": "2408"},
+    # 電腦品牌 / EMS
+    "2317": {"name": "Hon Hai Precision (Foxconn)", "zh_name": "鴻海", "code": "2317"},
+    "2357": {"name": "ASUSTeK Computer", "zh_name": "華碩", "code": "2357"},
+    "2353": {"name": "Acer", "zh_name": "宏碁", "code": "2353"},
+    "2376": {"name": "Gigabyte Technology", "zh_name": "技嘉", "code": "2376"},
+    "2382": {"name": "Quanta Computer", "zh_name": "廣達", "code": "2382"},
+    "3231": {"name": "Wistron Corporation", "zh_name": "緯創", "code": "3231"},
+    # 光學 / 精密
     "3008": {"name": "Largan Precision", "zh_name": "大立光", "code": "3008"},
-    "2498": {"name": "HTC", "zh_name": "宏達電", "code": "2498"},
-    "2412": {"name": "Chunghwa Telecom", "zh_name": "中華電", "code": "2412"},
-    "1303": {"name": "Nanya Technology", "zh_name": "南亞科", "code": "1303"},
-    "2882": {"name": "Cathay Pacific Airways", "zh_name": "國泰金", "code": "2882"},
-    "1101": {"name": "Taiwan Cement", "zh_name": "台泥", "code": "1101"},
-    "2891": {"name": "China Airlines", "zh_name": "中華航", "code": "2891"},
-    "1216": {"name": "Uni-President Enterprises", "zh_name": "統一", "code": "1216"},
-    "9904": {"name": "Powertech Technology", "zh_name": "寶硯", "code": "9904"},
-    "2409": {"name": "WISTRON", "zh_name": "威盛", "code": "2409"},
-    "2357": {"name": "AU Optronics", "zh_name": "群創", "code": "2357"},
+    # PCB / 基板
+    "2348": {"name": "Broadtech International", "zh_name": "華通", "code": "2348"},
+    "3037": {"name": "Unimicron Technology", "zh_name": "欣興", "code": "3037"},
+    # 面板
+    "3481": {"name": "Innolux Corporation", "zh_name": "群創", "code": "3481"},
+    "2409": {"name": "AU Optronics", "zh_name": "友達", "code": "2409"},
+    # 電源管理 / 電子
     "2308": {"name": "Delta Electronics", "zh_name": "台達電", "code": "2308"},
-    "2348": {"name": "BroadTech", "zh_name": "華通", "code": "2348"},
-    "2618": {"name": "Walton Advanced Engineering", "zh_name": "和鑫", "code": "2618"},
-    "2603": {"name": "Long Tech Precision", "zh_name": "長智", "code": "2603"},
-    "2610": {"name": "Realtek", "zh_name": "瑞昱", "code": "2610"},
-    "1590": {"name": "Taiga Motors", "zh_name": "亞德客", "code": "1590"},
-    "2542": {"name": "Gemtek", "zh_name": "智易", "code": "2542"},
-    "3231": {"name": "Apex Materials Technology", "zh_name": "耀華", "code": "3231"},
-    "4561": {"name": "Sunrise Medical Taiwan", "zh_name": "晟德", "code": "4561"},
-    "2635": {"name": "Giga-Byte Technology", "zh_name": "技嘉", "code": "2635"},
-    "2727": {"name": "Acer Aspire", "zh_name": "金寶", "code": "2727"},
-    "5222": {"name": "TPK Touch Panel", "zh_name": "TPK", "code": "5222"},
+    # 消費電子
+    "2498": {"name": "HTC Corporation", "zh_name": "宏達電", "code": "2498"},
+    # 電信
+    "2412": {"name": "Chunghwa Telecom", "zh_name": "中華電", "code": "2412"},
+    # 海運
+    "2603": {"name": "Evergreen Marine", "zh_name": "長榮", "code": "2603"},
+    "2609": {"name": "Yang Ming Marine", "zh_name": "陽明", "code": "2609"},
+    # 航空
+    "2610": {"name": "China Airlines", "zh_name": "華航", "code": "2610"},
+    "2618": {"name": "Eva Airways", "zh_name": "長榮航", "code": "2618"},
+    # 金融
+    "2882": {"name": "Cathay Financial Holdings", "zh_name": "國泰金", "code": "2882"},
+    "2884": {"name": "E.SUN Financial Holdings", "zh_name": "玉山金", "code": "2884"},
+    "2891": {"name": "CTBC Financial Holding", "zh_name": "中信金", "code": "2891"},
+    # 石化
+    "1301": {"name": "Formosa Plastics", "zh_name": "台塑", "code": "1301"},
+    "1303": {"name": "Nan Ya Plastics", "zh_name": "南亞", "code": "1303"},
+    # 水泥
+    "1101": {"name": "Taiwan Cement", "zh_name": "台泥", "code": "1101"},
+    # 食品
+    "1216": {"name": "Uni-President Enterprises", "zh_name": "統一", "code": "1216"},
+    # 工業自動化
+    "1590": {"name": "AIRTAC International", "zh_name": "亞德客", "code": "1590"},
+    # 製鞋
+    "9904": {"name": "Pou Chen Corporation", "zh_name": "寶成", "code": "9904"},
 }
 
 
@@ -218,9 +241,16 @@ class TaiwanStockClient:
             # If not in our mapping, still try to fetch it (might be valid code)
             return code_or_name
         
-        # Check if it's a company name (Chinese)
+        # Check if it's a company name — exact match first, then partial
         for code, info in TW_STOCK_NAMES.items():
             if info["zh_name"].lower() == code_or_name.lower():
                 return code
-        
+
+        # Partial match: user input contained in zh_name or zh_name contained in user input
+        for code, info in TW_STOCK_NAMES.items():
+            zh = info["zh_name"].lower()
+            query = code_or_name.lower()
+            if query in zh or zh in query:
+                return code
+
         return None
