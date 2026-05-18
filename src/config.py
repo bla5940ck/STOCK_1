@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
 
     # LINE Messaging API
-    LINE_CHANNEL_ACCESS_TOKEN: str
-    LINE_CHANNEL_SECRET: str
+    LINE_CHANNEL_ACCESS_TOKEN: str = "placeholder"
+    LINE_CHANNEL_SECRET: str = "placeholder"
 
     # Server
     SERVER_HOST: str = "0.0.0.0"
