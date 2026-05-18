@@ -10,14 +10,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libpq-dev python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Test app - minimal dependency
-RUN pip install --upgrade pip && pip install fastapi uvicorn
+COPY requirements.txt .
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --default-timeout=1000 -r requirements.txt
 
-COPY test_app.py .
-COPY entrypoint.sh .
+COPY src ./src
+COPY pyproject.toml .
 
-# Fix line endings and make executable
-RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+RUN mkdir -p logs
 
-# Railway automatically sets PORT env var - entrypoint.sh will read it
-ENTRYPOINT ["/app/entrypoint.sh"]
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

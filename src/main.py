@@ -26,18 +26,12 @@ app_logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown"""
     # Startup
-    settings = get_settings()
-    app_logger.info(f"===== APPLICATION STARTUP =====")
-    app_logger.info(f"Environment: SERVER_HOST={settings.SERVER_HOST}, SERVER_PORT={settings.SERVER_PORT}")
-    app_logger.info(f"Application starting up...")
+    app_logger.info("Application starting up...")
     try:
         await init_db()
         app_logger.info("✅ Database initialized")
     except Exception as e:
         app_logger.error(f"Database initialization failed (app will continue): {e}")
-    
-    app_logger.info(f"===== APPLICATION READY =====")
-    app_logger.info(f"App is listening on {settings.SERVER_HOST}:{settings.SERVER_PORT}")
     
     yield
     # Shutdown
@@ -98,7 +92,6 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health_check():
         """Health check endpoint"""
-        app_logger.info("✅ /health endpoint called")
         return {
             "status": "ok",
             "timestamp": datetime.utcnow().isoformat() + "Z",
