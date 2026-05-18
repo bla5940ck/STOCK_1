@@ -27,8 +27,11 @@ async def lifespan(app: FastAPI):
     """Handle application startup and shutdown"""
     # Startup
     app_logger.info("Application starting up...")
-    await init_db()
-    app_logger.info("✅ Database initialized")
+    try:
+        await init_db()
+        app_logger.info("✅ Database initialized")
+    except Exception as e:
+        app_logger.error(f"Database initialization failed (app will continue): {e}")
     
     # Pre-warm Taiwan stock cache with all available stocks (non-blocking)
     try:
@@ -59,7 +62,10 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 app_logger.warning(f"Taiwan stock cache pre-load failed: {e}")
             finally:
-                await client.close()
+                try:
+                    await client.close()
+                except:
+                    pass
         
         # Schedule cache pre-load (don't await - run in background)
         import asyncio
