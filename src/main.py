@@ -33,51 +33,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         app_logger.error(f"Database initialization failed (app will continue): {e}")
     
-    # Pre-warm Taiwan stock cache with all available stocks (non-blocking)
-    try:
-        from src.integrations.tw_stock_integration import TaiwanStockClient
-        client = TaiwanStockClient()
-        
-        async def preload_cache():
-            """Load all Taiwan stocks from TWSE in background"""
-            app_logger.debug("Starting Taiwan stock cache pre-load...")
-            try:
-                # Fetch all Taiwan stocks dynamically
-                all_stocks = await client.get_all_tw_stocks()
-                app_logger.info(f"Fetched {len(all_stocks)} Taiwan stocks from TWSE")
-                
-                # Pre-cache the top 50 most active stocks (by code order)
-                # This gives users quick access to popular stocks
-                stocks_to_preload = all_stocks[:50] if len(all_stocks) > 50 else all_stocks
-                
-                preloaded_count = 0
-                for stock in stocks_to_preload:
-                    try:
-                        await client.fetch_tw_stock(stock['code'], retries=1)
-                        preloaded_count += 1
-                    except Exception as e:
-                        app_logger.debug(f"Pre-load failed for {stock['code']}: {e}")
-                        
-                app_logger.info(f"Taiwan stock cache pre-load complete ({preloaded_count}/{len(stocks_to_preload)} stocks)")
-            except Exception as e:
-                app_logger.warning(f"Taiwan stock cache pre-load failed: {e}")
-            finally:
-                try:
-                    await client.close()
-                except:
-                    pass
-        
-        # Schedule cache pre-load (don't await - run in background)
-        import asyncio
-        asyncio.create_task(preload_cache())
-    except Exception as e:
-        app_logger.warning(f"Failed to initialize Taiwan stock cache: {e}")
+    # Note: Taiwan stock cache pre-load disabled for Railway stability
+    # Pre-loading will happen on-demand when users query
     
     yield
     # Shutdown
     app_logger.info("Application shutting down...")
-    await close_db()
-    app_logger.info("✅ Database closed")
+    try:
+        await close_db()
+        app_logger.info("✅ Database closed")
+    except Exception as e:
+        app_logger.error(f"Database shutdown error: {e}")
 
 
 def create_app() -> FastAPI:
