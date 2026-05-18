@@ -16,10 +16,10 @@ RUN pip install --upgrade pip setuptools wheel && \
 
 COPY src ./src
 COPY pyproject.toml .
-COPY run.py .
 
 RUN mkdir -p logs
 
 EXPOSE 8000
 
-CMD ["python", "run.py"]
+# Start with PORT env var, default to 8000
+CMD exec uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}
