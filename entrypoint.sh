@@ -26,7 +26,7 @@ sleep 3
 
 # Start Cloudflare Tunnel in background (no authentication needed - quick tunnel mode)
 echo "🌐 Starting Cloudflare Tunnel (quick mode, no auth)..."
-cloudflared tunnel run --url http://localhost:$PORT &
+cloudflared tunnel --url http://localhost:$PORT &
 TUNNEL_PID=$!
 
 # Wait for both processes
