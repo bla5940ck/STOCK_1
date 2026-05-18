@@ -31,9 +31,10 @@ COPY pyproject.toml .
 # Create logs directory
 RUN mkdir -p logs
 
-# Health check (use python since curl is not installed in slim image)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:' + __import__('os').environ.get('PORT','8000') + '/health')"
+# Copy and set up entrypoint script
+COPY start.sh .
+RUN chmod +x /app/start.sh
 
-# Run application (PORT env var is set by Railway, fallback to 8000 for local)
-CMD uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Run application via entrypoint script
+# PORT env var is set by Railway automatically; fallback to 8000 for local
+CMD ["/app/start.sh"]
