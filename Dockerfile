@@ -15,7 +15,5 @@ RUN pip install --upgrade pip && pip install fastapi uvicorn
 
 COPY test_app.py .
 
-EXPOSE 3000
-
-# Try port 3000 (Railway default)
-CMD exec uvicorn test_app:app --host 0.0.0.0 --port 3000
+# Railway automatically sets PORT env var - app will read it
+CMD exec python test_app.py
