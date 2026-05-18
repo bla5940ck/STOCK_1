@@ -60,14 +60,8 @@ def verify_line_signature(body: bytes, signature: str, channel_secret: str) -> b
 
     # Compare signatures
     if not hmac.compare_digest(calculated_signature, signature):
-        logger.error(f"Signature mismatch!")
-        logger.error(f"  Body: {body[:100]}...")
-        logger.error(f"  Secret: {channel_secret[:20]}...")
-        logger.error(f"  Expected: {calculated_signature}")
-        logger.error(f"  Got: {signature}")
-        raise SignatureError(f"Invalid signature")
+        raise SignatureError("Invalid signature")
 
-    logger.info("✅ Signature verified successfully")
     return True
 
 
@@ -98,13 +92,6 @@ async def verify_webhook_request(
     """
     settings = get_settings()
     body = await request.body()
-    
-    logger.info(f"Webhook received:")
-    logger.info(f"  Path: {request.url.path}")
-    logger.info(f"  Method: {request.method}")
-    logger.info(f"  Signature header: {signature[:20]}...")
-    logger.info(f"  Body length: {len(body)} bytes")
-    logger.info(f"  Secret: {settings.LINE_CHANNEL_SECRET[:20]}...")
 
     try:
         verify_line_signature(
@@ -113,14 +100,18 @@ async def verify_webhook_request(
             settings.LINE_CHANNEL_SECRET
         )
     except SignatureError as e:
-        logger.warning(f"Webhook signature verification failed: {e.message}")
+        logger.warning(f"Webhook signature verification failed: {str(e)}")
         raise HTTPException(status_code=401, detail="Unauthorized")
+    except Exception as e:
+        logger.error(f"Unexpected error during signature verification: {str(e)}")
+        raise HTTPException(status_code=400, detail="Bad Request")
 
     try:
         payload = json.loads(body)
         logger.info(f"Webhook body parsed successfully, events count: {len(payload.get('events', []))}")
         return payload
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON: {str(e)}")
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
 
