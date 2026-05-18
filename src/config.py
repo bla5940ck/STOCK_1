@@ -2,6 +2,7 @@
 Application configuration loading from environment variables.
 """
 
+import os
 from functools import lru_cache
 from typing import Optional
 from pydantic_settings import BaseSettings
@@ -16,7 +17,7 @@ class Settings(BaseSettings):
 
     # Server
     SERVER_HOST: str = "0.0.0.0"
-    SERVER_PORT: int = 8000
+    SERVER_PORT: int = int(os.environ.get("PORT", "8000"))
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
 
