@@ -60,8 +60,14 @@ def verify_line_signature(body: bytes, signature: str, channel_secret: str) -> b
 
     # Compare signatures
     if not hmac.compare_digest(calculated_signature, signature):
-        raise SignatureError(f"Invalid signature. Expected: {calculated_signature}, Got: {signature}")
+        logger.error(f"Signature mismatch!")
+        logger.error(f"  Body: {body[:100]}...")
+        logger.error(f"  Secret: {channel_secret[:20]}...")
+        logger.error(f"  Expected: {calculated_signature}")
+        logger.error(f"  Got: {signature}")
+        raise SignatureError(f"Invalid signature")
 
+    logger.info("✅ Signature verified successfully")
     return True
 
 
@@ -92,6 +98,13 @@ async def verify_webhook_request(
     """
     settings = get_settings()
     body = await request.body()
+    
+    logger.info(f"Webhook received:")
+    logger.info(f"  Path: {request.url.path}")
+    logger.info(f"  Method: {request.method}")
+    logger.info(f"  Signature header: {signature[:20]}...")
+    logger.info(f"  Body length: {len(body)} bytes")
+    logger.info(f"  Secret: {settings.LINE_CHANNEL_SECRET[:20]}...")
 
     try:
         verify_line_signature(
@@ -105,6 +118,7 @@ async def verify_webhook_request(
 
     try:
         payload = json.loads(body)
+        logger.info(f"Webhook body parsed successfully, events count: {len(payload.get('events', []))}")
         return payload
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
