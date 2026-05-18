@@ -4,8 +4,7 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PORT=8000
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libpq-dev python3-dev && \
@@ -17,9 +16,10 @@ RUN pip install --upgrade pip setuptools wheel && \
 
 COPY src ./src
 COPY pyproject.toml .
+COPY run.py .
 
 RUN mkdir -p logs
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "run.py"]
