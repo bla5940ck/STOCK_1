@@ -14,6 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --upgrade pip && pip install fastapi uvicorn
 
 COPY test_app.py .
+COPY entrypoint.sh .
 
-# Railway automatically sets PORT env var - app will read it
-CMD exec python test_app.py
+# Fix line endings and make executable
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# Railway automatically sets PORT env var - entrypoint.sh will read it
+ENTRYPOINT ["/app/entrypoint.sh"]
