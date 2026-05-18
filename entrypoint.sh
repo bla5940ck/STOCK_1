@@ -24,19 +24,10 @@ APP_PID=$!
 # Give the app time to start
 sleep 3
 
-# Start Cloudflare Tunnel in background (only if TUNNEL_TOKEN is set)
-if [ -n "$TUNNEL_TOKEN" ]; then
-    echo "🌐 Starting Cloudflare Tunnel..."
-    cloudflared tunnel run &
-    TUNNEL_PID=$!
-else
-    echo "⚠️  TUNNEL_TOKEN not set - Tunnel will not start (local mode only)"
-    TUNNEL_PID=""
-fi
+# Start Cloudflare Tunnel in background (no authentication needed - quick tunnel mode)
+echo "🌐 Starting Cloudflare Tunnel (quick mode, no auth)..."
+cloudflared tunnel run --url http://localhost:$PORT &
+TUNNEL_PID=$!
 
 # Wait for both processes
-if [ -n "$TUNNEL_PID" ]; then
-    wait $APP_PID $TUNNEL_PID
-else
-    wait $APP_PID
-fi
+wait $APP_PID $TUNNEL_PID
