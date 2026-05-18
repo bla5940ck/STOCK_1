@@ -16,10 +16,9 @@ RUN pip install --upgrade pip setuptools wheel && \
 
 COPY src ./src
 COPY pyproject.toml .
-COPY entrypoint.sh .
 
-RUN mkdir -p logs && chmod +x entrypoint.sh
+RUN mkdir -p logs
 
 EXPOSE 8000
 
-ENTRYPOINT ["bash", "entrypoint.sh"]
+CMD python -m uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}
