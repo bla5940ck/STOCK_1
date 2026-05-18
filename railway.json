@@ -1,9 +1,5 @@
 {
   "build": {
     "builder": "nixpacks"
-  },
-  "deploy": {
-    "healthcheckPath": "/health",
-    "healthcheckTimeout": 60
   }
 }
