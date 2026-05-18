@@ -30,24 +30,36 @@ async def lifespan(app: FastAPI):
     await init_db()
     app_logger.info("✅ Database initialized")
     
-    # Pre-warm Taiwan stock cache with common stocks (non-blocking)
+    # Pre-warm Taiwan stock cache with all available stocks (non-blocking)
     try:
         from src.integrations.tw_stock_integration import TaiwanStockClient
         client = TaiwanStockClient()
         
-        # Popular Taiwan stocks to pre-load
-        popular_stocks = ['2330', '2454', '2317', '2303', '2330', '1216', '2331', '2409']
-        
         async def preload_cache():
-            """Load cache in background"""
+            """Load all Taiwan stocks from TWSE in background"""
             app_logger.debug("Starting Taiwan stock cache pre-load...")
-            for code in popular_stocks:
-                try:
-                    await client.fetch_tw_stock(code, retries=1)
-                except Exception as e:
-                    app_logger.debug(f"Pre-load failed for {code}: {e}")
-            app_logger.debug("Taiwan stock cache pre-load complete")
-            await client.close()
+            try:
+                # Fetch all Taiwan stocks dynamically
+                all_stocks = await client.get_all_tw_stocks()
+                app_logger.info(f"Fetched {len(all_stocks)} Taiwan stocks from TWSE")
+                
+                # Pre-cache the top 50 most active stocks (by code order)
+                # This gives users quick access to popular stocks
+                stocks_to_preload = all_stocks[:50] if len(all_stocks) > 50 else all_stocks
+                
+                preloaded_count = 0
+                for stock in stocks_to_preload:
+                    try:
+                        await client.fetch_tw_stock(stock['code'], retries=1)
+                        preloaded_count += 1
+                    except Exception as e:
+                        app_logger.debug(f"Pre-load failed for {stock['code']}: {e}")
+                        
+                app_logger.info(f"Taiwan stock cache pre-load complete ({preloaded_count}/{len(stocks_to_preload)} stocks)")
+            except Exception as e:
+                app_logger.warning(f"Taiwan stock cache pre-load failed: {e}")
+            finally:
+                await client.close()
         
         # Schedule cache pre-load (don't await - run in background)
         import asyncio

@@ -5,7 +5,7 @@ Taiwan stock integration for fetching real-time stock data using TWSE open API.
 import aiohttp
 import asyncio
 import random
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 from decimal import Decimal
 from datetime import datetime
 
@@ -20,6 +20,7 @@ class TaiwanStockClient:
     """Taiwan stock data fetcher using TWSE (Taiwan Stock Exchange) open API"""
 
     TWSE_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
+    TWSE_LIST_URL = "https://mis.twse.com.tw/stock/api/getStockList.jsp"
     TIMEOUT = 8.0
     
     # Quick lookup for common stocks (fetched on demand and cached)
@@ -28,6 +29,10 @@ class TaiwanStockClient:
     
     # Pre-populate with a quick sample for common queries
     _quick_lookup_initialized = False
+    
+    # Cache all available Taiwan stocks
+    _all_stocks_cache = None
+    _all_stocks_cache_time = None
     
     # In-memory cache for stock data (persists during session)
     # Format: stock_code -> {data dict with timestamp}
@@ -120,6 +125,65 @@ class TaiwanStockClient:
     def _get_random_user_agent(self) -> str:
         """Get random User-Agent"""
         return random.choice(self.USER_AGENTS)
+
+    async def get_all_tw_stocks(self, use_cache: bool = True) -> List[dict]:
+        """
+        Fetch all Taiwan stock codes and names from local database.
+        
+        Args:
+            use_cache: Use cached list if available (session cache)
+            
+        Returns:
+            List of dicts with 'code', 'zh_name', 'market'
+        """
+        import json
+        from pathlib import Path
+        
+        # Check cache first (session cache)
+        if use_cache and TaiwanStockClient._all_stocks_cache:
+            logger.debug(f"Using cached stock list ({len(TaiwanStockClient._all_stocks_cache)} stocks)")
+            return TaiwanStockClient._all_stocks_cache
+        
+        all_stocks = []
+        
+        # Load from local JSON file (all Taiwan stocks)
+        try:
+            stock_file = Path(__file__).parent.parent / "data" / "tw_stocks.json"
+            
+            if stock_file.exists():
+                with open(stock_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    all_stocks = data.get("stocks", [])
+                    
+                if all_stocks:
+                    logger.info(f"Loaded {len(all_stocks)} Taiwan stocks from local database")
+                    # Cache the result
+                    TaiwanStockClient._all_stocks_cache = all_stocks
+                    TaiwanStockClient._all_stocks_cache_time = 0  # Local file is always valid
+                    return all_stocks
+            else:
+                logger.warning(f"Stock list file not found: {stock_file}")
+        except Exception as e:
+            logger.warning(f"Failed to load stock list from file: {e}")
+        
+        # Fallback: Return common stocks if file not available
+        logger.warning("Could not load stock list from file, using fallback list")
+        fallback = [
+            {"code": "2330", "zh_name": "台積電", "market": "TSE"},
+            {"code": "2454", "zh_name": "聯發科", "market": "TSE"},
+            {"code": "2317", "zh_name": "鴻海", "market": "TSE"},
+            {"code": "2303", "zh_name": "聯電", "market": "TSE"},
+            {"code": "1216", "zh_name": "統一超", "market": "TSE"},
+            {"code": "2331", "zh_name": "光磊", "market": "TSE"},
+            {"code": "2409", "zh_name": "友達", "market": "TSE"},
+            {"code": "2412", "zh_name": "中華電", "market": "TSE"},
+            {"code": "1101", "zh_name": "台泥", "market": "TSE"},
+            {"code": "1301", "zh_name": "台塑", "market": "TSE"},
+        ]
+        TaiwanStockClient._all_stocks_cache = fallback
+        TaiwanStockClient._all_stocks_cache_time = 0
+        return fallback
+
 
     async def fetch_tw_stock(self, symbol: str, retries: int = 3) -> Optional[dict]:
         """

@@ -1,9 +1,11 @@
 """
 Handler for Taiwan stock direct queries (e.g., 台積電, 2330).
+Supports dynamic stock lookup from live data sources.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.integrations.tw_stock_dynamic import get_taiwan_stock_client
 from src.integrations.tw_stock_integration import TaiwanStockClient
 from src.services.news_service import NewsService
 from src.utils.formatters import format_tw_stock_price_message, format_error_message
@@ -16,7 +18,11 @@ async def handle_tw_stock_search(db: AsyncSession, query: str) -> dict:
     """
     Handle Taiwan stock search by name or code.
     
-    Fetches Taiwan stock price data and related news articles.
+    Features:
+    - Search by stock code (e.g., "2330")
+    - Search by Chinese name (e.g., "台積電", "健策")
+    - Automatic fuzzy matching for similar names
+    - Fetches real-time price and related news
     
     Args:
         db: Database session
@@ -28,19 +34,17 @@ async def handle_tw_stock_search(db: AsyncSession, query: str) -> dict:
         - 'message': str (formatted message for LINE)
         - 'error_code': str (on failure)
     """
-    tw_client = TaiwanStockClient()
-    news_service = NewsService(db)
-    
     try:
-        # Resolve stock code from query
-        stock_code = TaiwanStockClient.resolve_tw_stock_code(query)
+        # Get dynamic client for live Taiwan stock lookup
+        dynamic_client = await get_taiwan_stock_client()
+        tw_client = TaiwanStockClient()
+        news_service = NewsService(db)
         
-        # If not a direct code, try to search by name
-        if not stock_code:
-            logger.debug(f"Code not found, searching by name: {query}")
-            stock_code = await tw_client.search_tw_stock(query)
+        # Search for stock by code or name
+        logger.info(f"Searching Taiwan stock: {query}")
+        stock_info = await dynamic_client.search_stock(query)
         
-        if not stock_code:
+        if not stock_info:
             logger.warning(f"Taiwan stock not found: {query}")
             return {
                 "success": False,
@@ -48,7 +52,10 @@ async def handle_tw_stock_search(db: AsyncSession, query: str) -> dict:
                 "message": format_error_message("E004_STOCK_NOT_FOUND", f"找不到台股標的：{query}"),
             }
 
-        # Fetch stock data
+        stock_code = stock_info["code"]
+        logger.info(f"Found Taiwan stock: {stock_code} ({stock_info.get('zh_name', '')})")
+
+        # Fetch real-time stock data
         stock_data = await tw_client.fetch_tw_stock(stock_code)
         
         if not stock_data:
@@ -59,8 +66,8 @@ async def handle_tw_stock_search(db: AsyncSession, query: str) -> dict:
                 "message": format_error_message("E003_API_ERROR", f"無法取得台股數據：{stock_code}"),
             }
 
-        # Fetch related news (company name in both English and Chinese)
-        company_name = stock_data.get("zh_name", stock_code)
+        # Fetch related news (use Chinese name)
+        company_name = stock_info.get("zh_name", stock_code)
         news_result = await news_service.fetch_related_news(company_name, limit=3)
         news_articles = news_result.get("data", []) if news_result.get("success") else []
 

@@ -6,6 +6,8 @@ from typing import List, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.domain import Index, Stock
+from src.integrations.twelve_data_client import TwelveDataClient
+from src.integrations.finnhub_client import FinnhubClient
 from src.integrations.yahoo_finance import YahooFinanceClient
 from src.integrations.alpha_vantage import AlphaVantageClient
 from src.utils.cache import CacheManager, CacheKeyBuilder, CachePolicies
@@ -31,11 +33,15 @@ class MarketDataService:
         self.db = db
         self.cache_manager = CacheManager(db)
         self.index_repo = IndexRepository(db)
+        self.twelve_data_client = TwelveDataClient()  # Primary source (free tier)
+        self.finnhub_client = FinnhubClient()  # Fallback (more reliable)
         self.yahoo_client = YahooFinanceClient()
         self.alpha_vantage_client = AlphaVantageClient()
 
     async def close(self):
         """Clean up resources"""
+        await self.twelve_data_client.close()
+        await self.finnhub_client.close()
         await self.yahoo_client.close()
         await self.alpha_vantage_client.close()
 
@@ -235,6 +241,13 @@ class MarketDataService:
         """
         Get stock data with fallback logic.
         
+        Fetching order:
+        1. Cache (2 min TTL)
+        2. Twelve Data (most reliable free tier)
+        3. Finnhub (fallback, requires API key)
+        4. Yahoo Finance (if Finnhub fails)
+        5. Alpha Vantage (last resort)
+        
         Args:
             stock_code: Stock code (e.g., "AAPL")
             
@@ -251,7 +264,7 @@ class MarketDataService:
 
         cache_key = CacheKeyBuilder.stock(stock_code)
         
-        # Check cache first
+        # Step 1: Check cache first
         cached_data = await self.cache_manager.get(cache_key)
         if cached_data:
             logger.info(f"Returning {stock_code} from cache")
@@ -261,9 +274,69 @@ class MarketDataService:
                 "source": "cache",
             }
 
-        # Try Yahoo Finance
+        # Step 2: Try Twelve Data (primary source - most reliable free tier)
         try:
-            logger.info(f"Fetching {stock_code} from Yahoo Finance")
+            logger.info(f"Fetching {stock_code} from Twelve Data")
+            stock = await self.twelve_data_client.fetch_stock(stock_code)
+            
+            if stock:
+                result = {
+                    "success": True,
+                    "data": stock,
+                    "source": "twelve_data",
+                }
+                
+                cache_data = {"stock": stock.dict()}
+                await self.cache_manager.set(
+                    cache_key,
+                    cache_data,
+                    "stock",
+                    CachePolicies.STOCK_TTL_MINUTES,
+                )
+                
+                logger.info(f"Successfully fetched {stock_code} from Twelve Data")
+                return result
+                
+        except TimeoutException as e:
+            logger.warning(f"Twelve Data timeout for {stock_code}: {e}")
+        except APIError as e:
+            logger.warning(f"Twelve Data API error for {stock_code}: {e}")
+        except Exception as e:
+            logger.warning(f"Unexpected error fetching from Twelve Data {stock_code}: {e}")
+
+        # Step 3: Try Finnhub
+        try:
+            logger.info(f"Falling back to Finnhub for {stock_code}")
+            stock = await self.finnhub_client.fetch_stock(stock_code)
+            
+            if stock:
+                result = {
+                    "success": True,
+                    "data": stock,
+                    "source": "finnhub",
+                }
+                
+                cache_data = {"stock": stock.dict()}
+                await self.cache_manager.set(
+                    cache_key,
+                    cache_data,
+                    "stock",
+                    CachePolicies.STOCK_TTL_MINUTES,
+                )
+                
+                logger.info(f"Successfully fetched {stock_code} from Finnhub")
+                return result
+                
+        except TimeoutException as e:
+            logger.warning(f"Finnhub timeout for {stock_code}: {e}")
+        except APIError as e:
+            logger.warning(f"Finnhub API error for {stock_code}: {e}")
+        except Exception as e:
+            logger.warning(f"Unexpected error fetching from Finnhub {stock_code}: {e}")
+
+        # Step 4: Try Yahoo Finance
+        try:
+            logger.info(f"Falling back to Yahoo Finance for {stock_code}")
             stock = await self.yahoo_client.fetch_stock(stock_code)
             
             if stock:
@@ -281,7 +354,7 @@ class MarketDataService:
                     CachePolicies.STOCK_TTL_MINUTES,
                 )
                 
-                logger.info(f"Successfully fetched {stock_code}")
+                logger.info(f"Successfully fetched {stock_code} from Yahoo Finance")
                 return result
                 
         except TimeoutException as e:
@@ -291,7 +364,7 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Unexpected error fetching {stock_code}: {e}")
 
-        # Try Alpha Vantage as fallback
+        # Step 5: Try Alpha Vantage as last resort
         try:
             logger.info(f"Falling back to Alpha Vantage for {stock_code}")
             stock_data = await self.alpha_vantage_client.fetch_stock(stock_code)
@@ -337,9 +410,10 @@ class MarketDataService:
                 return result
             
         except Exception as e:
-            logger.warning(f"Fallback failed for {stock_code}: {e}")
+            logger.warning(f"Alpha Vantage fallback failed for {stock_code}: {e}")
 
-        # Both failed
+        # All sources failed
+        logger.error(f"Failed to fetch data for stock {stock_code} from all sources")
         return {
             "success": False,
             "error_code": "E004_STOCK_NOT_FOUND",

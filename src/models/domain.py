@@ -27,6 +27,8 @@ class QueryStatusEnum(str, Enum):
 
 class DataSourceEnum(str, Enum):
     """Data sources for financial information"""
+    TWELVE_DATA = "twelve_data"
+    FINNHUB = "finnhub"
     YAHOO_FINANCE = "yahoo_finance"
     ALPHA_VANTAGE = "alpha_vantage"
     GOOGLE_NEWS = "google_news"

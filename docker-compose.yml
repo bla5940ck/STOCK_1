@@ -16,6 +16,21 @@ services:
       - ./logs:/app/logs
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: linebot-tunnel
+    command: tunnel --url http://app:8000 --no-autoupdate
+    depends_on:
+      - app
+    networks:
+      - default
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   postgres:
     image: postgres:15-alpine
     container_name: linebot-postgres
