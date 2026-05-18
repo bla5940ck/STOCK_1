@@ -31,9 +31,9 @@ COPY pyproject.toml .
 # Create logs directory
 RUN mkdir -p logs
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Health check (use python since curl is not installed in slim image)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:' + __import__('os').environ.get('PORT','8000') + '/health')"
 
 # Run application (PORT env var is set by Railway, fallback to 8000 for local)
 CMD uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}
