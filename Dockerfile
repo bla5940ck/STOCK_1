@@ -10,16 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ libpq-dev python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --default-timeout=1000 -r requirements.txt
+# Test app - minimal dependency
+RUN pip install --upgrade pip && pip install fastapi uvicorn
 
-COPY src ./src
-COPY pyproject.toml .
-
-RUN mkdir -p logs
+COPY test_app.py .
 
 EXPOSE 8000
 
-# Start with PORT env var, default to 8000
-CMD exec uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Start test app with PORT env var, default to 8000
+CMD exec uvicorn test_app:app --host 0.0.0.0 --port ${PORT:-8000}
