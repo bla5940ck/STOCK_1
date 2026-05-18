@@ -33,7 +33,8 @@ RUN mkdir -p logs
 
 # Copy and set up entrypoint script
 COPY start.sh .
-RUN chmod +x /app/start.sh
+# Fix CRLF line endings (Windows) and make executable
+RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
 
 # Run application via entrypoint script
 # PORT env var is set by Railway automatically; fallback to 8000 for local
