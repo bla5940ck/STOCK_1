@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 from datetime import datetime
+import traceback
 
 from src.config import get_settings
 from src.db.database import init_db, close_db, get_db
@@ -85,6 +86,22 @@ def create_app() -> FastAPI:
                 "error_message": exc.message,
                 "timestamp": datetime.utcnow().isoformat() + "Z",
                 "request_id": getattr(request.state, "request_id", None),
+            },
+        )
+
+    # Global exception handler
+    @app.exception_handler(Exception)
+    async def general_exception_handler(request: Request, exc: Exception):
+        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        tb = traceback.format_exc()
+        app_logger.error(f"[{request_id}] Unhandled exception: {exc}")
+        app_logger.error(f"[{request_id}] Traceback:\n{tb}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal server error",
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "request_id": request_id,
             },
         )
 
