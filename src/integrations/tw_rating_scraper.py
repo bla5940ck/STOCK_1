@@ -122,19 +122,37 @@ class TaiwanStockRatingScraper:
         try:
             result = {}
             
+            # Debug: Check if HTML contains expected keywords
+            if "買進" not in html and "持有" not in html and "賣出" not in html:
+                logger.warning(f"HTML doesn't contain rating keywords for {stock_code}")
+                logger.debug(f"HTML sample (first 500 chars): {html[:500]}")
+                return None
+            
+            if stock_code not in html:
+                logger.warning(f"Stock code {stock_code} not found in HTML")
+                return None
+            
             # Split by <TR> to get individual rows
             rows = html.split('<TR')
+            logger.debug(f"Found {len(rows)} potential rows in HTML")
             
+            matches_found = 0
             for row in rows:
                 # Look for the stock code in the row
                 if not stock_code in row:
                     continue
                 
+                matches_found += 1
+                logger.debug(f"Found row {matches_found} with stock code {stock_code}")
+                
                 # Extract all <TD>...</TD> values
                 td_pattern = r'<TD[^>]*>([^<]*)</TD>'
                 tds = re.findall(td_pattern, row)
                 
+                logger.debug(f"Extracted {len(tds)} TD values from row: {tds[:3]}...")  # Log first 3 TDs
+                
                 if len(tds) < 8:
+                    logger.debug(f"Row has only {len(tds)} TD values, need at least 8")
                     continue
                 
                 # Expected format:
@@ -151,6 +169,8 @@ class TaiwanStockRatingScraper:
                 rating = tds[5].strip() if len(tds) > 5 else ""
                 old_price_str = tds[6].strip() if len(tds) > 6 else ""
                 new_price_str = tds[7].strip() if len(tds) > 7 else ""
+                
+                logger.debug(f"Rating: '{rating}', Old Price: '{old_price_str}', New Price: '{new_price_str}'")
                 
                 # Extract price from strings (remove links, HTML, etc.)
                 old_price = self._extract_price(old_price_str)
