@@ -13,6 +13,7 @@ from src.utils.logger import get_logger
 from src.config import get_settings
 from src.exceptions import APIError, TimeoutError as TimeoutException
 from src.integrations.tw_fundamentals import get_taiwan_fundamentals_service
+from src.utils.fundamentals_fallback import get_us_stock_fallback, get_tw_stock_fallback
 
 logger = get_logger(__name__)
 
@@ -150,13 +151,28 @@ class FundamentalDataService:
                 return result if result else None
 
         except asyncio.TimeoutError:
-            logger.warning(f"Alpha Vantage timeout for {symbol}")
+            logger.warning(f"Alpha Vantage timeout for {symbol}, trying fallback")
+            # Try fallback data if API times out
+            fallback = get_us_stock_fallback(symbol)
+            if fallback:
+                logger.info(f"Using fallback data for {symbol}")
+                return fallback
             return None
         except aiohttp.ClientError as e:
-            logger.warning(f"Alpha Vantage connection error for {symbol}: {e}")
+            logger.warning(f"Alpha Vantage connection error for {symbol}: {e}, trying fallback")
+            # Try fallback data if connection fails
+            fallback = get_us_stock_fallback(symbol)
+            if fallback:
+                logger.info(f"Using fallback data for {symbol}")
+                return fallback
             return None
         except Exception as e:
-            logger.error(f"Unexpected error fetching fundamentals for {symbol}: {e}")
+            logger.error(f"Unexpected error fetching fundamentals for {symbol}: {e}, trying fallback")
+            # Try fallback data on any error
+            fallback = get_us_stock_fallback(symbol)
+            if fallback:
+                logger.info(f"Using fallback data for {symbol}")
+                return fallback
             return None
 
     async def get_tw_stock_fundamentals(self, stock_code: str, current_price: Decimal) -> Optional[Dict]:
@@ -187,12 +203,23 @@ class FundamentalDataService:
             if fundamentals:
                 logger.info(f"Fetched Taiwan stock fundamentals for {stock_code}")
                 return fundamentals
-            else:
-                logger.warning(f"No fundamentals found for Taiwan stock {stock_code}")
-                return None
+            
+            # Try fallback data if API returns nothing
+            fallback = get_tw_stock_fallback(stock_code)
+            if fallback:
+                logger.info(f"Using fallback data for Taiwan stock {stock_code}")
+                return fallback
+            
+            logger.warning(f"No fundamentals found for Taiwan stock {stock_code}")
+            return None
 
         except Exception as e:
-            logger.error(f"Error fetching Taiwan fundamentals for {stock_code}: {e}")
+            logger.error(f"Error fetching Taiwan fundamentals for {stock_code}: {e}, trying fallback")
+            # Try fallback data on error
+            fallback = get_tw_stock_fallback(stock_code)
+            if fallback:
+                logger.info(f"Using fallback data for Taiwan stock {stock_code}")
+                return fallback
             return None
 
     async def format_fundamentals(
