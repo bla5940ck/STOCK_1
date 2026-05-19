@@ -174,6 +174,40 @@ class TaiwanStockFundamentalsService:
             logger.warning(f"TWSE API error for {stock_code}: {e}")
             return None
 
+    async def get_analyst_ratings(self, stock_code: str) -> Optional[Dict]:
+        """
+        Get analyst ratings and target prices from CNYES.
+        
+        Args:
+            stock_code: Taiwan stock code (e.g., "2330")
+            
+        Returns:
+            Dict with keys:
+            - 'buy_count': Number of buy ratings
+            - 'hold_count': Number of hold ratings
+            - 'sell_count': Number of sell ratings
+            - 'rating_score': Overall score (0-10)
+            - 'avg_target_price': Average analyst target price
+            
+        Returns None if unable to fetch.
+        """
+        from src.integrations.tw_rating_scraper import get_rating_scraper
+        
+        try:
+            scraper = await get_rating_scraper()
+            ratings = await scraper.get_analyst_ratings(stock_code)
+            
+            if ratings:
+                logger.info(f"Fetched analyst ratings for {stock_code}")
+                return ratings
+            else:
+                logger.warning(f"No ratings found for {stock_code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error fetching analyst ratings for {stock_code}: {e}")
+            return None
+
 
 # Global instance
 _tw_fundamentals_service: Optional[TaiwanStockFundamentalsService] = None

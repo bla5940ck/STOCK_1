@@ -1,0 +1,286 @@
+"""
+Taiwan stock fundamentals scraper from CNYES and WantGoo.
+Fetches analyst ratings, target prices, and quarterly EPS rankings.
+"""
+
+import aiohttp
+import asyncio
+from typing import Optional, Dict, List
+from datetime import datetime
+from decimal import Decimal
+import re
+from html import unescape
+
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class TaiwanStockRatingScraper:
+    """Scrape Taiwan stock ratings and price targets from CNYES"""
+    
+    def __init__(self):
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.base_url = "https://www.cnyes.com/twstock/board/ratediff.aspx"
+        
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session"""
+        if self.session is None:
+            self.session = aiohttp.ClientSession()
+        return self.session
+    
+    async def close(self):
+        """Close session"""
+        if self.session:
+            await self.session.close()
+            self.session = None
+    
+    async def get_analyst_ratings(self, stock_code: str) -> Optional[Dict]:
+        """
+        Get analyst ratings and target prices from CNYES.
+        
+        Args:
+            stock_code: Taiwan stock code (e.g., "2330")
+            
+        Returns:
+            Dict with keys:
+            - 'buy_count': Number of buy ratings
+            - 'hold_count': Number of hold ratings  
+            - 'sell_count': Number of sell ratings
+            - 'avg_target_price': Average analyst target price
+            - 'max_target_price': Highest target price
+            - 'min_target_price': Lowest target price
+            - 'rating_score': Overall rating score (0-10)
+            
+        Returns None if unable to fetch.
+        """
+        session = await self._get_session()
+        
+        try:
+            # CNYES has query parameter for stock code
+            params = {"StockCode": stock_code}
+            
+            async with session.get(
+                self.base_url, 
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=10),
+                headers={"User-Agent": "Mozilla/5.0"}
+            ) as response:
+                if response.status != 200:
+                    logger.warning(f"CNYES API error for {stock_code}: {response.status}")
+                    return None
+                
+                html = await response.text()
+                
+                # Parse HTML to extract rating data
+                result = self._parse_cnyes_ratings(html, stock_code)
+                
+                if result:
+                    logger.info(f"Fetched analyst ratings for {stock_code}: {result}")
+                    return result
+                else:
+                    logger.warning(f"Could not parse ratings for {stock_code}")
+                    return None
+                    
+        except asyncio.TimeoutError:
+            logger.warning(f"CNYES timeout for {stock_code}")
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching CNYES ratings for {stock_code}: {e}")
+            return None
+    
+    def _parse_cnyes_ratings(self, html: str, stock_code: str) -> Optional[Dict]:
+        """
+        Parse HTML content to extract analyst ratings.
+        
+        Looks for patterns like:
+        - Buy: X | Hold: X | Sell: X
+        - Target Price: NT$X.XX
+        """
+        try:
+            result = {}
+            
+            # Look for buy/hold/sell counts using regex
+            # Pattern: "買進: 數字 | 持有: 數字 | 賣出: 數字"
+            pattern = r'買進[：:]\s*(\d+).*?持有[：:]\s*(\d+).*?賣出[：:]\s*(\d+)'
+            match = re.search(pattern, html, re.DOTALL)
+            
+            if match:
+                result['buy_count'] = int(match.group(1))
+                result['hold_count'] = int(match.group(2))
+                result['sell_count'] = int(match.group(3))
+                
+                # Calculate rating score (0-10, where 10 = all buy)
+                total = result['buy_count'] + result['hold_count'] + result['sell_count']
+                if total > 0:
+                    buy_ratio = result['buy_count'] / total
+                    result['rating_score'] = round(buy_ratio * 10, 1)
+            
+            # Look for target price: "目標價: NT$1234.56" or similar
+            price_pattern = r'目標價[：:]\s*NT\$?([\d,]+\.?\d*)'
+            price_matches = re.findall(price_pattern, html)
+            
+            if price_matches:
+                prices = []
+                for price_str in price_matches:
+                    try:
+                        # Remove commas and convert
+                        price = float(price_str.replace(',', ''))
+                        prices.append(price)
+                    except (ValueError, TypeError):
+                        pass
+                
+                if prices:
+                    result['avg_target_price'] = sum(prices) / len(prices)
+                    result['max_target_price'] = max(prices)
+                    result['min_target_price'] = min(prices)
+            
+            return result if result else None
+            
+        except Exception as e:
+            logger.error(f"Error parsing CNYES HTML: {e}")
+            return None
+
+
+class TaiwanStockEPSRankingScraper:
+    """Scrape Taiwan stock EPS rankings from WantGoo"""
+    
+    def __init__(self):
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.base_url = "https://www.wantgoo.com/stock/ranking/most-recent-quarter-eps"
+        
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session"""
+        if self.session is None:
+            self.session = aiohttp.ClientSession()
+        return self.session
+    
+    async def close(self):
+        """Close session"""
+        if self.session:
+            await self.session.close()
+            self.session = None
+    
+    async def get_top_eps_stocks(self, limit: int = 20) -> Optional[List[Dict]]:
+        """
+        Get top Taiwan stocks by most recent quarter EPS.
+        
+        Args:
+            limit: Number of top stocks to return (default 20)
+            
+        Returns:
+            List of dicts with keys:
+            - 'code': Stock code
+            - 'name': Stock name  
+            - 'latest_quarter_eps': Latest quarter EPS
+            - 'yoy_growth': Year-over-year growth %
+            - 'rank': Ranking position
+            
+        Returns None if unable to fetch.
+        """
+        session = await self._get_session()
+        
+        try:
+            async with session.get(
+                self.base_url,
+                timeout=aiohttp.ClientTimeout(total=15),
+                headers={"User-Agent": "Mozilla/5.0"}
+            ) as response:
+                if response.status != 200:
+                    logger.warning(f"WantGoo EPS ranking API error: {response.status}")
+                    return None
+                
+                html = await response.text()
+                
+                # Parse HTML to extract EPS ranking data
+                result = self._parse_wantgoo_eps(html, limit)
+                
+                if result:
+                    logger.info(f"Fetched {len(result)} top EPS stocks from WantGoo")
+                    return result
+                else:
+                    logger.warning("Could not parse WantGoo EPS ranking")
+                    return None
+                    
+        except asyncio.TimeoutError:
+            logger.warning("WantGoo EPS ranking timeout")
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching WantGoo EPS ranking: {e}")
+            return None
+    
+    def _parse_wantgoo_eps(self, html: str, limit: int) -> Optional[List[Dict]]:
+        """
+        Parse HTML to extract EPS ranking data.
+        
+        Looks for table rows with:
+        - Stock code
+        - Stock name
+        - Latest quarter EPS
+        - YoY growth
+        """
+        try:
+            results = []
+            
+            # Look for table rows with data-code or similar
+            # Pattern: <tr ...>.*?<td>代碼</td>.*?<td>NT$數字</td>
+            row_pattern = r'<tr[^>]*>(.*?)</tr>'
+            rows = re.findall(row_pattern, html, re.DOTALL)
+            
+            rank = 1
+            for row in rows[:limit]:
+                # Extract code
+                code_match = re.search(r'<td[^>]*>\s*(\d{4})\s*</td>', row)
+                if not code_match:
+                    continue
+                    
+                code = code_match.group(1)
+                
+                # Extract name
+                name_match = re.search(r'<td[^>]*>\s*([^<]+)\s*</td>', row)
+                name = name_match.group(1) if name_match else ""
+                
+                # Extract EPS
+                eps_match = re.search(r'NT\$?([\d,]+\.?\d*)', row)
+                eps = None
+                if eps_match:
+                    try:
+                        eps = float(eps_match.group(1).replace(',', ''))
+                    except (ValueError, TypeError):
+                        pass
+                
+                if code and eps:
+                    results.append({
+                        'code': code,
+                        'name': unescape(name.strip()),
+                        'latest_quarter_eps': eps,
+                        'rank': rank
+                    })
+                    rank += 1
+            
+            return results if results else None
+            
+        except Exception as e:
+            logger.error(f"Error parsing WantGoo EPS HTML: {e}")
+            return None
+
+
+# Singleton instances
+_rating_scraper: Optional[TaiwanStockRatingScraper] = None
+_eps_scraper: Optional[TaiwanStockEPSRankingScraper] = None
+
+
+async def get_rating_scraper() -> TaiwanStockRatingScraper:
+    """Get or create rating scraper instance"""
+    global _rating_scraper
+    if _rating_scraper is None:
+        _rating_scraper = TaiwanStockRatingScraper()
+    return _rating_scraper
+
+
+async def get_eps_ranking_scraper() -> TaiwanStockEPSRankingScraper:
+    """Get or create EPS ranking scraper instance"""
+    global _eps_scraper
+    if _eps_scraper is None:
+        _eps_scraper = TaiwanStockEPSRankingScraper()
+    return _eps_scraper
