@@ -38,6 +38,7 @@ class TaiwanStockRatingScraper:
     async def get_analyst_ratings(self, stock_code: str) -> Optional[Dict]:
         """
         Get analyst ratings and target prices from CNYES.
+        Falls back to cached data if live scraping fails.
         
         Args:
             stock_code: Taiwan stock code (e.g., "2330")
@@ -51,8 +52,9 @@ class TaiwanStockRatingScraper:
             - 'max_target_price': Highest target price
             - 'min_target_price': Lowest target price
             - 'rating_score': Overall rating score (0-10)
+            - 'source': "live" or "fallback" indicating data source
             
-        Returns None if unable to fetch.
+        Returns None if unable to fetch live data and no fallback available.
         """
         session = await self._get_session()
         
@@ -82,6 +84,7 @@ class TaiwanStockRatingScraper:
                         result = self._parse_cnyes_ratings(html, stock_code)
                         
                         if result:
+                            result["source"] = "live"
                             logger.info(f"Fetched analyst ratings for {stock_code} from {url}")
                             return result
                         else:
@@ -94,13 +97,20 @@ class TaiwanStockRatingScraper:
                     logger.debug(f"Error fetching {url}: {e}")
                     continue
             
-            if not result:
-                logger.warning(f"Could not fetch analyst ratings from any CNYES URL for {stock_code}")
+            # If live scraping failed, try fallback data
+            logger.info(f"Live CNYES scraping failed for {stock_code}, attempting fallback")
+            fallback_result = self._get_fallback_ratings(stock_code)
+            if fallback_result:
+                logger.info(f"Using fallback ratings for {stock_code}")
+                return fallback_result
+            
+            logger.warning(f"Could not fetch analyst ratings from any source for {stock_code}")
             return None
                     
         except Exception as e:
             logger.error(f"Error in get_analyst_ratings for {stock_code}: {e}")
-            return None
+            # Try fallback as last resort
+            return self._get_fallback_ratings(stock_code)
     
     def _parse_cnyes_ratings(self, html: str, stock_code: str) -> Optional[Dict]:
         """
@@ -236,6 +246,21 @@ class TaiwanStockRatingScraper:
                 return float(text)
         except (ValueError, TypeError):
             pass
+        
+        return None
+    
+    def _get_fallback_ratings(self, stock_code: str) -> Optional[Dict]:
+        """Get fallback analyst ratings for a stock"""
+        try:
+            from src.utils.ratings_fallback import get_tw_stock_fallback_ratings
+            
+            fallback = get_tw_stock_fallback_ratings(stock_code)
+            if fallback:
+                fallback["source"] = "fallback"
+                logger.debug(f"Returning fallback ratings for {stock_code}")
+                return fallback
+        except Exception as e:
+            logger.debug(f"Error loading fallback ratings: {e}")
         
         return None
 
