@@ -26,6 +26,8 @@ class Settings(BaseSettings):
 
     # External APIs
     ALPHA_VANTAGE_API_KEY: Optional[str] = None
+    TWELVE_DATA_API_KEY: Optional[str] = None
+    FINNHUB_API_KEY: Optional[str] = None
 
     # Timeouts (seconds)
     API_TIMEOUT: int = 20
