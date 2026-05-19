@@ -127,22 +127,17 @@ def create_app() -> FastAPI:
 
     # Webhook endpoint with signature verification
     @app.post("/webhook/line")
-    async def line_webhook(request: Request):
+    async def line_webhook(
+        payload: dict = Depends(verify_webhook_request),
+        db: AsyncSession = Depends(get_db),
+    ):
         """
         LINE Messaging API Webhook endpoint.
-        Simplified for debugging 502 error.
+        Handles message events and sends replies.
         """
         try:
-            body = await request.body()
-            signature = request.headers.get("X-Line-Signature", "")
-            
-            app_logger.info(f"Webhook received:")
-            app_logger.info(f"  Path: {request.url.path}")
-            app_logger.info(f"  Signature: {signature[:20] if signature else 'MISSING'}...")
-            app_logger.info(f"  Body size: {len(body)} bytes")
-            
-            # Return 200 OK immediately for now
-            return JSONResponse(status_code=200, content={"status": "ok"})
+            handler = WebhookEventHandler(db)
+            return await handler.handle_webhook(payload)
         except Exception as e:
             app_logger.error(f"Webhook error: {e}")
             app_logger.error(traceback.format_exc())
