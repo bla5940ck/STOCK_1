@@ -39,7 +39,6 @@ async def handle_tw_stock_search(db: AsyncSession, query: str) -> dict:
         dynamic_client = await get_taiwan_stock_client()
         tw_client = TaiwanStockClient()
         news_service = NewsService(db)
-        fundamental_service = FundamentalDataService()
         
         # Search for stock by code or name
         logger.info(f"Searching Taiwan stock: {query}")
