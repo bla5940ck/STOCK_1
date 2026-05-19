@@ -91,55 +91,120 @@ class TaiwanStockRatingScraper:
     
     def _parse_cnyes_ratings(self, html: str, stock_code: str) -> Optional[Dict]:
         """
-        Parse HTML content to extract analyst ratings.
+        Parse HTML content to extract analyst ratings for specific stock.
         
-        Looks for patterns like:
-        - Buy: X | Hold: X | Sell: X
-        - Target Price: NT$X.XX
+        CNYES returns a table with all recent ratings:
+        <TR>
+            <TD>20260519</TD>
+            <TD><a href>2330-台積電</a></TD>
+            <TD>Factset</TD>
+            <TD></TD>
+            <TD></TD>
+            <TD>買進</TD>
+            <TD>舊目標價</TD>
+            <TD>新目標價</TD>
+            <TD>其他價格</TD>
+        </TR>
         """
         try:
             result = {}
             
-            # Look for buy/hold/sell counts using regex
-            # Pattern: "買進: 數字 | 持有: 數字 | 賣出: 數字"
-            pattern = r'買進[：:]\s*(\d+).*?持有[：:]\s*(\d+).*?賣出[：:]\s*(\d+)'
-            match = re.search(pattern, html, re.DOTALL)
+            # Split by <TR> to get individual rows
+            rows = html.split('<TR')
             
-            if match:
-                result['buy_count'] = int(match.group(1))
-                result['hold_count'] = int(match.group(2))
-                result['sell_count'] = int(match.group(3))
+            for row in rows:
+                # Look for the stock code in the row
+                if not stock_code in row:
+                    continue
                 
-                # Calculate rating score (0-10, where 10 = all buy)
-                total = result['buy_count'] + result['hold_count'] + result['sell_count']
+                # Extract all <TD>...</TD> values
+                td_pattern = r'<TD[^>]*>([^<]*)</TD>'
+                tds = re.findall(td_pattern, row)
+                
+                if len(tds) < 8:
+                    continue
+                
+                # Expected format:
+                # [0] = date
+                # [1] = stock link (contains code and name)
+                # [2] = analyst firm
+                # [3] = blank
+                # [4] = blank  
+                # [5] = rating (買進/持有/賣出/強力買進)
+                # [6] = old target price
+                # [7] = new target price
+                # [8+] = other prices
+                
+                rating = tds[5].strip() if len(tds) > 5 else ""
+                old_price_str = tds[6].strip() if len(tds) > 6 else ""
+                new_price_str = tds[7].strip() if len(tds) > 7 else ""
+                
+                # Extract price from strings (remove links, HTML, etc.)
+                old_price = self._extract_price(old_price_str)
+                new_price = self._extract_price(new_price_str)
+                
+                # Map rating to buy/hold/sell
+                if "買進" in rating:
+                    result["buy_count"] = result.get("buy_count", 0) + 1
+                elif "持有" in rating:
+                    result["hold_count"] = result.get("hold_count", 0) + 1
+                elif "賣出" in rating:
+                    result["sell_count"] = result.get("sell_count", 0) + 1
+                
+                # Store target prices
+                if new_price:
+                    if "target_prices" not in result:
+                        result["target_prices"] = []
+                    result["target_prices"].append(new_price)
+                elif old_price:
+                    if "target_prices" not in result:
+                        result["target_prices"] = []
+                    result["target_prices"].append(old_price)
+            
+            # Calculate aggregates if we found data
+            if result or "target_prices" in result:
+                # Calculate average target price
+                if "target_prices" in result and result["target_prices"]:
+                    prices = result["target_prices"]
+                    result["avg_target_price"] = sum(prices) / len(prices)
+                    result["max_target_price"] = max(prices)
+                    result["min_target_price"] = min(prices)
+                    del result["target_prices"]
+                
+                # Calculate rating score
+                total = result.get("buy_count", 0) + result.get("hold_count", 0) + result.get("sell_count", 0)
                 if total > 0:
-                    buy_ratio = result['buy_count'] / total
-                    result['rating_score'] = round(buy_ratio * 10, 1)
-            
-            # Look for target price: "目標價: NT$1234.56" or similar
-            price_pattern = r'目標價[：:]\s*NT\$?([\d,]+\.?\d*)'
-            price_matches = re.findall(price_pattern, html)
-            
-            if price_matches:
-                prices = []
-                for price_str in price_matches:
-                    try:
-                        # Remove commas and convert
-                        price = float(price_str.replace(',', ''))
-                        prices.append(price)
-                    except (ValueError, TypeError):
-                        pass
+                    buy_ratio = result.get("buy_count", 0) / total
+                    result["rating_score"] = round(buy_ratio * 10, 1)
                 
-                if prices:
-                    result['avg_target_price'] = sum(prices) / len(prices)
-                    result['max_target_price'] = max(prices)
-                    result['min_target_price'] = min(prices)
+                if result:
+                    return result
             
-            return result if result else None
+            return None
             
         except Exception as e:
             logger.error(f"Error parsing CNYES HTML: {e}")
             return None
+    
+    def _extract_price(self, text: str) -> Optional[float]:
+        """Extract numeric price from text, handling NT$ prefix and commas"""
+        if not text:
+            return None
+        
+        try:
+            # Remove HTML tags, links
+            text = re.sub(r'<[^>]+>', '', text)
+            # Remove NT$ prefix
+            text = text.replace('NT$', '').replace('NT￥', '').strip()
+            # Remove commas
+            text = text.replace(',', '')
+            
+            if text and text != '-' and text != '':
+                return float(text)
+        except (ValueError, TypeError):
+            pass
+        
+        return None
 
 
 class TaiwanStockEPSRankingScraper:
