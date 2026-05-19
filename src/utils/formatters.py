@@ -770,7 +770,7 @@ def format_tw_stock_price_message(
     # Add analyst ratings if available
     if analyst_ratings:
         lines.append("")
-        lines.append("📈 投行評等 (CNYES):")
+        lines.append("📈 分析師評等 (Yahoo Finance):")
         if "buy_count" in analyst_ratings:
             lines.append(f"  評等: 買進 {analyst_ratings['buy_count']} | 持有 {analyst_ratings.get('hold_count', 0)} | 賣出 {analyst_ratings.get('sell_count', 0)}")
         if "rating_score" in analyst_ratings:
@@ -778,11 +778,11 @@ def format_tw_stock_price_message(
             stars = "★" * int(score / 2) + "☆" * (5 - int(score / 2))
             lines.append(f"  評分: {score}/10 {stars}")
         if "avg_target_price" in analyst_ratings:
-            lines.append(f"  平均目標價: NT${analyst_ratings['avg_target_price']:.2f}")
+            lines.append(f"  平均目標價: NT${int(analyst_ratings['avg_target_price']):,}")
         if "max_target_price" in analyst_ratings:
-            lines.append(f"  最高目標價: NT${analyst_ratings['max_target_price']:.2f}")
+            lines.append(f"  最高目標價: NT${int(analyst_ratings['max_target_price']):,}")
         if "min_target_price" in analyst_ratings:
-            lines.append(f"  最低目標價: NT${analyst_ratings['min_target_price']:.2f}")
+            lines.append(f"  最低目標價: NT${int(analyst_ratings['min_target_price']):,}")
     
     # Note: Remove inaccurate static valuation analysis for Taiwan stocks too
     lines.append("")

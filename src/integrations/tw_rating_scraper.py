@@ -17,121 +17,152 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+
+# Taiwan stock code → US ADR ticker mapping (for analyst data fallback)
+TW_TO_US_ADR: Dict[str, str] = {
+    "2330": "TSM",   # TSMC
+    "2317": "HNHPF", # Foxconn
+    "2412": "CHT",   # Chunghwa Telecom
+    "2882": "FUBON", # Fubon (limited ADR)
+}
+
+
 class TaiwanStockRatingScraper:
     """Fetch Taiwan stock analyst ratings and target prices via Yahoo Finance"""
-    
+
     def __init__(self):
         pass
-        
+
     async def get_analyst_ratings(self, stock_code: str) -> Optional[Dict]:
         """
         Get analyst ratings and target prices from Yahoo Finance.
-        
-        Args:
-            stock_code: Taiwan stock code (e.g., "2330")
-            
-        Returns:
-            Dict with keys:
-            - 'buy_count': Number of buy ratings
-            - 'hold_count': Number of hold ratings  
-            - 'sell_count': Number of sell ratings
-            - 'avg_target_price': Average analyst target price (TWD)
-            - 'max_target_price': Highest target price (TWD)
-            - 'min_target_price': Lowest target price (TWD)
-            - 'rating_score': Overall rating score (0-10)
-            
-        Returns None if unable to fetch.
+
+        Returns dict with buy_count, hold_count, sell_count,
+        avg_target_price, max_target_price, min_target_price,
+        rating_score, data_source. Returns None if unavailable.
         """
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, self._fetch_yfinance_data, stock_code)
             return result
         except Exception as e:
             logger.error(f"Error fetching analyst data for {stock_code}: {e}")
             return None
-    
+
+    def _get_usd_twd_rate(self, yf) -> float:
+        """Return current USD/TWD exchange rate; falls back to 32.0 on failure."""
+        try:
+            fx = yf.Ticker("USDTWD=X")
+            rate = fx.fast_info.last_price
+            if rate and 25.0 < float(rate) < 45.0:
+                return float(rate)
+        except Exception:
+            pass
+        return 32.0
+
+    def _extract_from_info(self, info: dict, usd_rate: float = 1.0) -> dict:
+        """Pull price targets and recommendation key from a yfinance info dict."""
+        result = {}
+        mean_price = info.get("targetMeanPrice")
+        high_price = info.get("targetHighPrice")
+        low_price  = info.get("targetLowPrice")
+        num_analysts = info.get("numberOfAnalystOpinions", 0)
+        rec_key = info.get("recommendationKey", "")
+
+        if mean_price:
+            result["avg_target_price"] = round(float(mean_price) * usd_rate)
+        if high_price:
+            result["max_target_price"] = round(float(high_price) * usd_rate)
+        if low_price:
+            result["min_target_price"] = round(float(low_price) * usd_rate)
+        if num_analysts:
+            result["num_analysts"] = int(num_analysts)
+        if rec_key:
+            result["recommendation_key"] = rec_key
+        return result
+
+    def _extract_recs(self, ticker) -> dict:
+        """Pull buy/hold/sell counts and rating_score from recommendations_summary."""
+        result = {}
+        try:
+            recs = ticker.recommendations_summary
+            if recs is not None and not recs.empty:
+                latest = recs.iloc[0]
+                strong_buy  = int(latest.get("strongBuy",  0) or 0)
+                buy         = int(latest.get("buy",         0) or 0)
+                hold        = int(latest.get("hold",        0) or 0)
+                sell        = int(latest.get("sell",        0) or 0)
+                strong_sell = int(latest.get("strongSell",  0) or 0)
+
+                result["buy_count"]  = strong_buy + buy
+                result["hold_count"] = hold
+                result["sell_count"] = sell + strong_sell
+
+                total = result["buy_count"] + result["hold_count"] + result["sell_count"]
+                if total > 0:
+                    result["rating_score"] = round(result["buy_count"] / total * 10, 1)
+        except Exception as e:
+            logger.debug(f"Could not read recommendations_summary: {e}")
+        return result
+
     def _fetch_yfinance_data(self, stock_code: str) -> Optional[Dict]:
         """
         Fetch analyst data from Yahoo Finance synchronously.
-        Called via run_in_executor to avoid blocking the event loop.
+        1. Try {code}.TW directly.
+        2. If no analyst data, fall back to US ADR (if mapped) with USD→TWD conversion.
         """
         try:
             import yfinance as yf
-            
-            symbol = f"{stock_code}.TW"
-            ticker = yf.Ticker(symbol)
-            result = {}
-            
-            # Get analyst price targets from ticker.info
+
+            # ── Step 1: Try Taiwan market ticker ──────────────────────────────
+            tw_symbol = f"{stock_code}.TW"
             try:
-                info = ticker.info
-                if info:
-                    mean_price = info.get("targetMeanPrice")
-                    high_price = info.get("targetHighPrice")
-                    low_price  = info.get("targetLowPrice")
-                    num_analysts = info.get("numberOfAnalystOpinions", 0)
-                    rec_key = info.get("recommendationKey", "")  # e.g. 'buy', 'strong_buy', 'hold'
-                    
-                    if mean_price:
-                        result["avg_target_price"] = float(mean_price)
-                    if high_price:
-                        result["max_target_price"] = float(high_price)
-                    if low_price:
-                        result["min_target_price"] = float(low_price)
-                    if num_analysts:
-                        result["num_analysts"] = int(num_analysts)
-                    if rec_key:
-                        result["recommendation_key"] = rec_key
+                ticker = yf.Ticker(tw_symbol)
+                info = ticker.info or {}
+                result = self._extract_from_info(info)
+                result.update(self._extract_recs(ticker))
+
+                if result.get("avg_target_price") or result.get("buy_count"):
+                    result["data_source"] = "Yahoo Finance (TW)"
+                    logger.info(f"Analyst data from {tw_symbol}: {result}")
+                    return result
             except Exception as e:
-                logger.debug(f"Could not read ticker.info for {symbol}: {e}")
-            
-            # Get recommendations summary (buy/hold/sell counts)
+                logger.debug(f"Taiwan ticker failed for {tw_symbol}: {e}")
+
+            # ── Step 2: Fall back to US ADR ────────────────────────────────────
+            us_symbol = TW_TO_US_ADR.get(stock_code)
+            if not us_symbol:
+                logger.warning(f"No analyst data and no US ADR mapping for {stock_code}")
+                return None
+
+            logger.info(f"No TW analyst data for {stock_code}, trying US ADR: {us_symbol}")
             try:
-                recs = ticker.recommendations_summary
-                if recs is not None and not recs.empty:
-                    latest = recs.iloc[0]
-                    strong_buy  = int(latest.get("strongBuy",  0) or 0)
-                    buy         = int(latest.get("buy",         0) or 0)
-                    hold        = int(latest.get("hold",        0) or 0)
-                    sell        = int(latest.get("sell",        0) or 0)
-                    strong_sell = int(latest.get("strongSell",  0) or 0)
-                    
-                    result["buy_count"]  = strong_buy + buy
-                    result["hold_count"] = hold
-                    result["sell_count"] = sell + strong_sell
-                    
-                    total = result["buy_count"] + result["hold_count"] + result["sell_count"]
-                    if total > 0:
-                        buy_ratio = result["buy_count"] / total
-                        result["rating_score"] = round(buy_ratio * 10, 1)
+                usd_rate = self._get_usd_twd_rate(yf)
+                ticker = yf.Ticker(us_symbol)
+                info = ticker.info or {}
+                result = self._extract_from_info(info, usd_rate=usd_rate)
+                result.update(self._extract_recs(ticker))
+
+                if result.get("avg_target_price") or result.get("buy_count"):
+                    result["data_source"] = f"Yahoo Finance ({us_symbol} ADR, ×{usd_rate:.1f})"
+                    logger.info(f"Analyst data from {us_symbol} ADR (rate={usd_rate}): {result}")
+                    return result
             except Exception as e:
-                logger.debug(f"Could not read recommendations_summary for {symbol}: {e}")
-            
-            if result and ("avg_target_price" in result or "buy_count" in result):
-                result["data_source"] = "Yahoo Finance"
-                logger.info(f"Fetched analyst data for {symbol}: {result}")
-                return result
-            
-            logger.warning(f"No analyst data available on Yahoo Finance for {symbol}")
+                logger.debug(f"US ADR fetch failed for {us_symbol}: {e}")
+
+            logger.warning(f"No analyst data available for {stock_code}")
             return None
-            
+
         except Exception as e:
             logger.error(f"yfinance error for {stock_code}: {e}")
             return None
 
     # Legacy stubs (kept for interface compatibility)
     def _parse_cnyes_ratings(self, html: str, stock_code: str) -> Optional[Dict]:
-        """Legacy method — no longer used"""
         return None
 
     def _extract_price(self, text: str) -> Optional[float]:
-        """Legacy method — no longer used"""
         return None
-
-    #     <TD>Price 1 (old target)</TD>
-    #     <TD>Price 2 (new target)</TD>
-    #     <TD>Current Price</TD>
-    # </TR>
 
 
 class TaiwanStockEPSRankingScraper:
