@@ -307,3 +307,107 @@ class FundamentalDataService:
         except Exception as e:
             logger.error(f"Error formatting fundamentals for {symbol}: {e}")
             return None, None
+
+    async def get_quarterly_earnings(self, symbol: str) -> Optional[Dict]:
+        """
+        Fetch quarterly earnings data from Alpha Vantage EARNINGS endpoint.
+        
+        Returns data about latest quarters and YTD:
+        - 'latest_quarter_eps': Last reported quarter EPS
+        - 'prev_quarter_eps': Previous quarter EPS
+        - 'latest_quarter_date': Latest quarter fiscal date
+        - 'ytd_eps': Year-to-date EPS
+        - 'next_quarter_estimate': Next quarter estimated EPS (if available)
+        
+        Args:
+            symbol: Stock symbol (e.g., "AAPL")
+            
+        Returns:
+            Dict with quarterly data, or None if unavailable
+        """
+        if not self.settings.ALPHA_VANTAGE_API_KEY:
+            logger.warning("Alpha Vantage API key not configured")
+            return None
+
+        session = await self._get_session()
+        url = "https://www.alphavantage.co/query"
+        
+        params = {
+            "function": "EARNINGS",
+            "symbol": symbol.upper(),
+            "apikey": self.settings.ALPHA_VANTAGE_API_KEY,
+        }
+
+        try:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    logger.warning(f"Alpha Vantage EARNINGS API error for {symbol}: {response.status}")
+                    return None
+
+                data = await response.json()
+                
+                # Check if API returned an error
+                if "Error Message" in data or "Information" in data:
+                    logger.warning(f"Alpha Vantage EARNINGS error for {symbol}: {data}")
+                    return None
+
+                # Parse quarterly data
+                if "quarterlyEarnings" not in data or not data["quarterlyEarnings"]:
+                    logger.warning(f"No quarterly earnings data for {symbol}")
+                    return None
+
+                earnings = data["quarterlyEarnings"]
+                result = {}
+
+                # Get latest and previous quarter data
+                if len(earnings) >= 1:
+                    latest = earnings[0]
+                    result["latest_quarter_date"] = latest.get("fiscalDateEnding")
+                    
+                    # Use reported EPS if available, otherwise use estimated
+                    reported_eps = latest.get("reportedEPS", "None")
+                    if reported_eps != "None":
+                        try:
+                            result["latest_quarter_eps"] = float(reported_eps)
+                        except (ValueError, TypeError):
+                            pass
+
+                if len(earnings) >= 2:
+                    prev = earnings[1]
+                    prev_eps = prev.get("reportedEPS", "None")
+                    if prev_eps != "None":
+                        try:
+                            result["prev_quarter_eps"] = float(prev_eps)
+                        except (ValueError, TypeError):
+                            pass
+
+                # Calculate YTD EPS (sum of all quarters in current year)
+                import datetime as dt
+                current_year = dt.datetime.now().year
+                ytd_eps = 0.0
+                ytd_count = 0
+                
+                for quarter in earnings:
+                    fiscal_date = quarter.get("fiscalDateEnding", "")
+                    if fiscal_date.startswith(str(current_year)):
+                        eps_str = quarter.get("reportedEPS", "None")
+                        if eps_str != "None":
+                            try:
+                                ytd_eps += float(eps_str)
+                                ytd_count += 1
+                            except (ValueError, TypeError):
+                                pass
+                
+                if ytd_count > 0:
+                    result["ytd_eps"] = ytd_eps
+                    result["ytd_eps_quarters"] = ytd_count
+
+                logger.info(f"Successfully fetched quarterly earnings for {symbol}: {result}")
+                return result if result else None
+
+        except asyncio.TimeoutError:
+            logger.warning(f"Alpha Vantage EARNINGS timeout for {symbol}")
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching quarterly earnings for {symbol}: {e}")
+            return None

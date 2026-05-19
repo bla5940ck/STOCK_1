@@ -19,6 +19,9 @@ US_STOCKS_FALLBACK = {
         "analyst_target_price": 308.07,
         "week_52_high": 315.50,
         "week_52_low": 210.50,
+        "latest_quarter_eps": 1.53,
+        "prev_quarter_eps": 1.46,
+        "ytd_eps": 5.48,
         "data_source": "Alpha Vantage + Analyst Consensus",
     },
     "MSFT": {
@@ -29,6 +32,9 @@ US_STOCKS_FALLBACK = {
         "analyst_target_price": 520.00,
         "week_52_high": 525.00,
         "week_52_low": 385.00,
+        "latest_quarter_eps": 2.99,
+        "prev_quarter_eps": 2.95,
+        "ytd_eps": 8.75,
         "data_source": "Market Data",
     },
     "GOOGL": {
@@ -39,6 +45,9 @@ US_STOCKS_FALLBACK = {
         "analyst_target_price": 245.00,
         "week_52_high": 248.00,
         "week_52_low": 158.00,
+        "latest_quarter_eps": 1.91,
+        "prev_quarter_eps": 1.88,
+        "ytd_eps": 5.68,
         "data_source": "Market Data",
     },
     "TSLA": {
@@ -49,6 +58,9 @@ US_STOCKS_FALLBACK = {
         "analyst_target_price": 325.00,
         "week_52_high": 380.00,
         "week_52_low": 185.00,
+        "latest_quarter_eps": 0.54,
+        "prev_quarter_eps": 0.73,
+        "ytd_eps": 1.28,
         "data_source": "Market Data",
     },
     "NVDA": {
@@ -59,6 +71,9 @@ US_STOCKS_FALLBACK = {
         "analyst_target_price": 200.00,
         "week_52_high": 385.00,
         "week_52_low": 125.00,
+        "latest_quarter_eps": 0.68,
+        "prev_quarter_eps": 0.75,
+        "ytd_eps": 2.12,
         "data_source": "Market Data",
     },
     "META": {
@@ -69,6 +84,9 @@ US_STOCKS_FALLBACK = {
         "analyst_target_price": 765.00,
         "week_52_high": 795.00,
         "week_52_low": 410.00,
+        "latest_quarter_eps": 1.45,
+        "prev_quarter_eps": 1.38,
+        "ytd_eps": 4.28,
         "data_source": "Market Data",
     },
     "AMZN": {

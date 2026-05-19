@@ -54,18 +54,26 @@ async def handle_stock_query(db: AsyncSession, stock_code: str) -> dict:
         
         # Fetch fundamental data (PE, EPS, dividend yield, etc.) - optional, won't fail the query
         fundamentals = None
+        quarterly_earnings = None
         try:
             fundamentals = await fundamental_service.get_us_stock_fundamentals(stock_code)
             logger.info(f"Fetched fundamentals for {stock_code}")
         except Exception as e:
             logger.warning(f"Could not fetch fundamentals for {stock_code}: {e}")
         
+        try:
+            quarterly_earnings = await fundamental_service.get_quarterly_earnings(stock_code)
+            if quarterly_earnings:
+                logger.info(f"Fetched quarterly earnings for {stock_code}")
+        except Exception as e:
+            logger.warning(f"Could not fetch quarterly earnings for {stock_code}: {e}")
+        
         # Fetch related news
         news_result = await news_service.fetch_related_news(stock_code, limit=3)
         news_articles = news_result.get("data", []) if news_result.get("success") else []
         
         # Format message for LINE
-        message = format_stock_message(stock, news_articles, fundamentals)
+        message = format_stock_message(stock, news_articles, fundamentals, quarterly_earnings)
         
         logger.info(f"Stock query successful for {stock_code}")
         

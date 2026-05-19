@@ -375,6 +375,7 @@ def format_stock_message(
     stock: Stock,
     news_articles: Optional[List[NewsArticle]] = None,
     fundamentals: Optional[dict] = None,
+    quarterly_earnings: Optional[dict] = None,
 ) -> str:
     """
     Format stock data with optional news articles and live fundamental data.
@@ -384,6 +385,8 @@ def format_stock_message(
         news_articles: Optional list of NewsArticle objects (max 5)
         fundamentals: Optional dict with live fundamentals from API
                      - Keys: 'pe_ratio', 'eps', 'dividend_yield', 'analyst_target_price', etc.
+        quarterly_earnings: Optional dict with quarterly earnings data
+                           - Keys: 'latest_quarter_eps', 'prev_quarter_eps', 'ytd_eps', etc.
         
     Returns:
         Formatted message
@@ -464,6 +467,21 @@ def format_stock_message(
             lines.append(f"📊 PE比: {stock.pe_ratio}")
         if stock.dividend_yield:
             lines.append(f"💵 股息殖利率: {stock.dividend_yield}%")
+    
+    # Add quarterly earnings data if available
+    if quarterly_earnings:
+        lines.append("")
+        lines.append("📅 季度盈利:")
+        if "latest_quarter_date" in quarterly_earnings:
+            lines.append(f"  最新季度 ({quarterly_earnings['latest_quarter_date']}):")
+        if "latest_quarter_eps" in quarterly_earnings:
+            lines.append(f"    季度 EPS: ${quarterly_earnings['latest_quarter_eps']:.2f}")
+        if "prev_quarter_eps" in quarterly_earnings:
+            lines.append(f"  上季度 EPS: ${quarterly_earnings['prev_quarter_eps']:.2f}")
+        if "ytd_eps" in quarterly_earnings:
+            ytd_eps = quarterly_earnings['ytd_eps']
+            quarters = quarterly_earnings.get('ytd_eps_quarters', 1)
+            lines.append(f"  今年 YTD EPS: ${ytd_eps:.2f} ({quarters}個季度)")
 
     # Note: Remove inaccurate static valuation analysis
     lines.append("")
