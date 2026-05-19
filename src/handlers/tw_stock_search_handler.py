@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.integrations.tw_stock_dynamic import get_taiwan_stock_client
 from src.integrations.tw_stock_integration import TaiwanStockClient
 from src.services.news_service import NewsService
-from src.services.fundamental_data import FundamentalDataService
 from src.utils.formatters import format_tw_stock_price_message, format_error_message
 from src.utils.logger import get_logger
 
@@ -70,13 +69,22 @@ async def handle_tw_stock_search(db: AsyncSession, query: str) -> dict:
 
         # Try to fetch fundamental data (PE, dividend yield) - optional
         fundamentals = None
+        analyst_ratings = None
         try:
             from decimal import Decimal
+            from src.integrations.tw_fundamentals import get_taiwan_fundamentals_service
+            
             current_price = Decimal(str(stock_data.get("current_price", 0)))
-            fundamentals = await fundamental_service.get_tw_stock_fundamentals(stock_code, current_price)
+            tw_fund_service = await get_taiwan_fundamentals_service()
+            fundamentals = await tw_fund_service.get_fundamentals(stock_code)
             logger.info(f"Fetched Taiwan stock fundamentals for {stock_code}")
+            
+            # Also fetch analyst ratings from CNYES
+            analyst_ratings = await tw_fund_service.get_analyst_ratings(stock_code)
+            if analyst_ratings:
+                logger.info(f"Fetched analyst ratings for {stock_code}")
         except Exception as e:
-            logger.warning(f"Could not fetch Taiwan stock fundamentals for {stock_code}: {e}")
+            logger.warning(f"Could not fetch Taiwan stock data: {e}")
 
         # Fetch related news (use Chinese name)
         company_name = stock_info.get("zh_name", stock_code)
@@ -84,7 +92,7 @@ async def handle_tw_stock_search(db: AsyncSession, query: str) -> dict:
         news_articles = news_result.get("data", []) if news_result.get("success") else []
 
         # Format message for LINE
-        message = format_tw_stock_price_message(stock_data, news_articles, fundamentals)
+        message = format_tw_stock_price_message(stock_data, news_articles, fundamentals, analyst_ratings)
 
         logger.info(f"Taiwan stock query successful for {stock_code}")
 
@@ -105,4 +113,3 @@ async def handle_tw_stock_search(db: AsyncSession, query: str) -> dict:
     finally:
         await tw_client.close()
         await news_service.close()
-        await fundamental_service.close()

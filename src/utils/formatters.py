@@ -677,6 +677,7 @@ def format_tw_stock_price_message(
     stock_data: dict,
     news_articles: Optional[List[NewsArticle]] = None,
     fundamentals: Optional[dict] = None,
+    analyst_ratings: Optional[dict] = None,
 ) -> str:
     """
     Format Taiwan stock data with optional news articles and live fundamental data.
@@ -686,6 +687,8 @@ def format_tw_stock_price_message(
         news_articles: Optional list of NewsArticle objects
         fundamentals: Optional dict with live fundamentals from API
                      - Keys: 'pe_ratio', 'dividend_yield', etc.
+        analyst_ratings: Optional dict with analyst ratings from CNYES
+                        - Keys: 'buy_count', 'hold_count', 'sell_count', 'avg_target_price'
         
     Returns:
         Formatted message
@@ -763,6 +766,23 @@ def format_tw_stock_price_message(
             lines.append(f"  配息率: {fundamentals['payout_ratio']:.1f}%")
         if "roe" in fundamentals:
             lines.append(f"  股東權益報酬率 (ROE): {fundamentals['roe']:.1f}%")
+    
+    # Add analyst ratings if available
+    if analyst_ratings:
+        lines.append("")
+        lines.append("📈 投行評等 (CNYES):")
+        if "buy_count" in analyst_ratings:
+            lines.append(f"  評等: 買進 {analyst_ratings['buy_count']} | 持有 {analyst_ratings.get('hold_count', 0)} | 賣出 {analyst_ratings.get('sell_count', 0)}")
+        if "rating_score" in analyst_ratings:
+            score = analyst_ratings['rating_score']
+            stars = "★" * int(score / 2) + "☆" * (5 - int(score / 2))
+            lines.append(f"  評分: {score}/10 {stars}")
+        if "avg_target_price" in analyst_ratings:
+            lines.append(f"  平均目標價: NT${analyst_ratings['avg_target_price']:.2f}")
+        if "max_target_price" in analyst_ratings:
+            lines.append(f"  最高目標價: NT${analyst_ratings['max_target_price']:.2f}")
+        if "min_target_price" in analyst_ratings:
+            lines.append(f"  最低目標價: NT${analyst_ratings['min_target_price']:.2f}")
     
     # Note: Remove inaccurate static valuation analysis for Taiwan stocks too
     lines.append("")
