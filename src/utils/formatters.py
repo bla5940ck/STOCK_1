@@ -371,13 +371,19 @@ def format_index_message(indices: List[Index]) -> str:
     return "\n".join(lines)
 
 
-def format_stock_message(stock: Stock, news_articles: Optional[List[NewsArticle]] = None) -> str:
+def format_stock_message(
+    stock: Stock,
+    news_articles: Optional[List[NewsArticle]] = None,
+    fundamentals: Optional[dict] = None,
+) -> str:
     """
-    Format stock data with optional news articles.
+    Format stock data with optional news articles and live fundamental data.
     
     Args:
         stock: Stock object
         news_articles: Optional list of NewsArticle objects (max 5)
+        fundamentals: Optional dict with live fundamentals from API
+                     - Keys: 'pe_ratio', 'eps', 'dividend_yield', 'analyst_target_price', etc.
         
     Returns:
         Formatted message
@@ -385,15 +391,15 @@ def format_stock_message(stock: Stock, news_articles: Optional[List[NewsArticle]
     Example:
         📈 AAPL - 蘋果公司
         現價: $180.50 🔴↑0.70% (前收: $179.25)
-        市值: $2,800B | PE比: 28.5 | 股息: 0.45%
+        🔓 開盤價: $179.85
+        📈 最高價: $182.10
+        📉 最低價: $178.50
+        💼 市值: $2,800B
+        📊 PE比: 28.5 (來自 Alpha Vantage)
+        💵 股息殖利率: 0.45%
         
         📰 相關新聞:
         • 蘋果新 iPhone 發佈會確認
-          蘋果公司宣佈將在下月舉辦新品發佈會...
-          來源: 科技新聞 | 2026-05-17
-        
-        • 蘋果股價創新高
-          ...
     """
     lines = []
 
@@ -437,14 +443,31 @@ def format_stock_message(stock: Stock, news_articles: Optional[List[NewsArticle]
     # Additional info - one per line
     if stock.market_cap_billion:
         lines.append(f"💼 市值: ${stock.market_cap_billion}B")
-    if stock.pe_ratio:
-        lines.append(f"📊 PE比: {stock.pe_ratio}")
-    if stock.dividend_yield:
-        lines.append(f"💵 股息殖利率: {stock.dividend_yield}%")
+    
+    # Use live fundamentals data if available, otherwise fall back to stock object
+    if fundamentals:
+        if "pe_ratio" in fundamentals:
+            lines.append(f"📊 PE比: {fundamentals['pe_ratio']:.1f}x (實時)")
+        if "eps" in fundamentals:
+            lines.append(f"📈 EPS: ${fundamentals['eps']:.2f} (實時)")
+        if "dividend_yield" in fundamentals:
+            lines.append(f"💵 股息殖利率: {fundamentals['dividend_yield']:.2f}% (實時)")
+        if "analyst_target_price" in fundamentals:
+            lines.append(f"🎯 分析師目標價: ${fundamentals['analyst_target_price']:.2f}")
+        if "week_52_high" in fundamentals:
+            lines.append(f"📍 52週高: ${fundamentals['week_52_high']:.2f}")
+        if "week_52_low" in fundamentals:
+            lines.append(f"📍 52週低: ${fundamentals['week_52_low']:.2f}")
+    else:
+        # Fallback to stock object data if available
+        if stock.pe_ratio:
+            lines.append(f"📊 PE比: {stock.pe_ratio}")
+        if stock.dividend_yield:
+            lines.append(f"💵 股息殖利率: {stock.dividend_yield}%")
 
     # Note: Remove inaccurate static valuation analysis
     lines.append("")
-    lines.append("ℹ️ 💡提示: 目標價和 EPS 為估算值，請查詢最新投資研報以獲得準確信息")
+    lines.append("ℹ️ 💡提示: 所有基本面數據來自實時 API，請查詢最新投資研報以獲得準確分析")
 
     # News section
     if news_articles:
@@ -632,26 +655,34 @@ def format_suggestion_message() -> str:
     return "\n".join(lines)
 
 
-def format_tw_stock_price_message(stock_data: dict, news_articles: Optional[List[NewsArticle]] = None) -> str:
+def format_tw_stock_price_message(
+    stock_data: dict,
+    news_articles: Optional[List[NewsArticle]] = None,
+    fundamentals: Optional[dict] = None,
+) -> str:
     """
-    Format Taiwan stock data with optional news articles.
+    Format Taiwan stock data with optional news articles and live fundamental data.
     
     Args:
         stock_data: Dict with Taiwan stock info from integration
         news_articles: Optional list of NewsArticle objects
+        fundamentals: Optional dict with live fundamentals from API
+                     - Keys: 'pe_ratio', 'dividend_yield', etc.
         
     Returns:
         Formatted message
         
     Example:
         🇹🇼 2330 - 台積電
-        現價: ₩2500.00 🔴↑0.80% (前收: ₩2480.00)
-        開盤: ₩2490.00 | 最高: ₩2510.00 | 最低: ₩2475.00
+        現價: NT$2500.00 🔴↑0.80% (前收: NT$2480.00)
+        開盤: NT$2490.00
+        最高: NT$2510.00
+        最低: NT$2475.00
+        成交量: 29,500,000
         
-        📰 相關新聞:
-        • 台積電第二季度盈利超預期
-          台積電公佈第二季度財報，盈利超過市場預期...
-          來源: 工商時報 | 2026-05-17
+        📊 基本面 (實時):
+        P/E比: 22.5x
+        股息殖利率: 2.8%
     """
     from datetime import datetime
     
@@ -699,6 +730,15 @@ def format_tw_stock_price_message(stock_data: dict, news_articles: Optional[List
     if volume > 0:
         volume_str = f"{volume:,.0f}" if volume >= 1000 else str(volume)
         lines.append(f"📋 成交量: {volume_str}")
+    
+    # Add fundamental data if available
+    if fundamentals:
+        lines.append("")
+        lines.append("📊 基本面數據 (實時):")
+        if "pe_ratio" in fundamentals:
+            lines.append(f"  P/E比: {fundamentals['pe_ratio']:.1f}x")
+        if "dividend_yield" in fundamentals:
+            lines.append(f"  股息殖利率: {fundamentals['dividend_yield']:.2f}%")
     
     # Note: Remove inaccurate static valuation analysis for Taiwan stocks too
     lines.append("")
