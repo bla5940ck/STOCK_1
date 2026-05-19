@@ -1,10 +1,11 @@
 """
-Taiwan stock fundamentals scraper from CNYES and WantGoo.
+Taiwan stock fundamentals scraper using Yahoo Finance (yfinance).
 Fetches analyst ratings, target prices, and quarterly EPS rankings.
-Uses Playwright for JavaScript-rendered pages.
+No browser automation needed - uses yfinance REST API.
 """
 
 import asyncio
+import aiohttp
 from typing import Optional, Dict, List
 from datetime import datetime
 from decimal import Decimal
@@ -15,24 +16,16 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-try:
-    from playwright.async_api import async_playwright
-    PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    logger.warning("Playwright not available, will use basic HTTP fallback")
-    PLAYWRIGHT_AVAILABLE = False
-
 
 class TaiwanStockRatingScraper:
-    """Scrape Taiwan stock ratings and price targets from CNYES using Playwright"""
+    """Fetch Taiwan stock analyst ratings and target prices via Yahoo Finance"""
     
     def __init__(self):
-        self.base_url = "https://www.cnyes.com/twstock/board/ratediff.aspx"
+        pass
         
     async def get_analyst_ratings(self, stock_code: str) -> Optional[Dict]:
         """
-        Get analyst ratings and target prices from CNYES.
-        Uses Playwright to handle JavaScript-rendered content.
+        Get analyst ratings and target prices from Yahoo Finance.
         
         Args:
             stock_code: Taiwan stock code (e.g., "2330")
@@ -42,191 +35,103 @@ class TaiwanStockRatingScraper:
             - 'buy_count': Number of buy ratings
             - 'hold_count': Number of hold ratings  
             - 'sell_count': Number of sell ratings
-            - 'avg_target_price': Average analyst target price
-            - 'max_target_price': Highest target price
-            - 'min_target_price': Lowest target price
+            - 'avg_target_price': Average analyst target price (TWD)
+            - 'max_target_price': Highest target price (TWD)
+            - 'min_target_price': Lowest target price (TWD)
             - 'rating_score': Overall rating score (0-10)
             
         Returns None if unable to fetch.
         """
-        if not PLAYWRIGHT_AVAILABLE:
-            logger.warning("Playwright not available for CNYES scraping")
-            return None
-        
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page()
-                
-                try:
-                    # Navigate to CNYES rating page
-                    url = f"{self.base_url}?StockCode={stock_code}"
-                    logger.info(f"Loading CNYES page: {url}")
-                    
-                    await page.goto(url, wait_until="networkidle", timeout=10000)
-                    
-                    # Wait for table to load
-                    await page.wait_for_selector("table tr", timeout=5000)
-                    
-                    # Get the rendered HTML
-                    html = await page.content()
-                    
-                    # Parse the HTML to extract ratings
-                    result = self._parse_cnyes_ratings(html, stock_code)
-                    
-                    if result:
-                        logger.info(f"Successfully scraped {stock_code} ratings from CNYES")
-                        return result
-                    else:
-                        logger.warning(f"Could not parse ratings for {stock_code} from rendered HTML")
-                        return None
-                
-                finally:
-                    await browser.close()
-                    
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, self._fetch_yfinance_data, stock_code)
+            return result
         except Exception as e:
-            logger.error(f"Error scraping CNYES with Playwright for {stock_code}: {e}")
+            logger.error(f"Error fetching analyst data for {stock_code}: {e}")
             return None
     
-    def _parse_cnyes_ratings(self, html: str, stock_code: str) -> Optional[Dict]:
+    def _fetch_yfinance_data(self, stock_code: str) -> Optional[Dict]:
         """
-        Parse HTML content to extract analyst ratings for specific stock.
-        
-        CNYES table format:
-        <TR>
-            <TD>Date</TD>
-            <TD>Stock Code-Name</TD>
-            <TD>Firm</TD>
-            <TD>Rating (買進/強力買進/etc)</TD>
-            <TD>Price 1</TD>
-            <TD>Price 2</TD>
-            ...
-        </TR>
+        Fetch analyst data from Yahoo Finance synchronously.
+        Called via run_in_executor to avoid blocking the event loop.
         """
         try:
+            import yfinance as yf
+            
+            symbol = f"{stock_code}.TW"
+            ticker = yf.Ticker(symbol)
             result = {}
             
-            # Debug: Check if HTML contains expected keywords
-            if "買進" not in html and "持有" not in html and "賣出" not in html:
-                logger.warning(f"HTML doesn't contain rating keywords for {stock_code}")
-                return None
+            # Get analyst price targets from ticker.info
+            try:
+                info = ticker.info
+                if info:
+                    mean_price = info.get("targetMeanPrice")
+                    high_price = info.get("targetHighPrice")
+                    low_price  = info.get("targetLowPrice")
+                    num_analysts = info.get("numberOfAnalystOpinions", 0)
+                    rec_key = info.get("recommendationKey", "")  # e.g. 'buy', 'strong_buy', 'hold'
+                    
+                    if mean_price:
+                        result["avg_target_price"] = float(mean_price)
+                    if high_price:
+                        result["max_target_price"] = float(high_price)
+                    if low_price:
+                        result["min_target_price"] = float(low_price)
+                    if num_analysts:
+                        result["num_analysts"] = int(num_analysts)
+                    if rec_key:
+                        result["recommendation_key"] = rec_key
+            except Exception as e:
+                logger.debug(f"Could not read ticker.info for {symbol}: {e}")
             
-            if stock_code not in html:
-                logger.warning(f"Stock code {stock_code} not found in HTML")
-                return None
+            # Get recommendations summary (buy/hold/sell counts)
+            try:
+                recs = ticker.recommendations_summary
+                if recs is not None and not recs.empty:
+                    latest = recs.iloc[0]
+                    strong_buy  = int(latest.get("strongBuy",  0) or 0)
+                    buy         = int(latest.get("buy",         0) or 0)
+                    hold        = int(latest.get("hold",        0) or 0)
+                    sell        = int(latest.get("sell",        0) or 0)
+                    strong_sell = int(latest.get("strongSell",  0) or 0)
+                    
+                    result["buy_count"]  = strong_buy + buy
+                    result["hold_count"] = hold
+                    result["sell_count"] = sell + strong_sell
+                    
+                    total = result["buy_count"] + result["hold_count"] + result["sell_count"]
+                    if total > 0:
+                        buy_ratio = result["buy_count"] / total
+                        result["rating_score"] = round(buy_ratio * 10, 1)
+            except Exception as e:
+                logger.debug(f"Could not read recommendations_summary for {symbol}: {e}")
             
-            # Split by <TR> to get individual rows
-            rows = html.split('<TR')
-            logger.debug(f"Found {len(rows)} potential rows in HTML")
-            
-            matches_found = 0
-            for row in rows:
-                # Look for the stock code in the row
-                if not stock_code in row:
-                    continue
-                
-                matches_found += 1
-                
-                # Extract all <TD>...</TD> values
-                td_pattern = r'<TD[^>]*>([^<]*)</TD>'
-                tds = re.findall(td_pattern, row)
-                
-                logger.debug(f"Row {matches_found}: Found {len(tds)} TD values")
-                
-                if len(tds) < 4:
-                    logger.debug(f"Row has only {len(tds)} TD values, need at least 4")
-                    continue
-                
-                # Find rating column (search through TDs for rating keywords)
-                rating = ""
-                rating_idx = -1
-                for i in range(len(tds)):
-                    if "買進" in tds[i] or "持有" in tds[i] or "賣出" in tds[i] or "強力" in tds[i]:
-                        rating = tds[i].strip()
-                        rating_idx = i
-                        break
-                
-                if not rating or rating_idx == -1:
-                    logger.debug(f"No rating found in row")
-                    continue
-                
-                logger.debug(f"Found rating: '{rating}' at index {rating_idx}")
-                
-                # Extract prices - look for numeric values after rating
-                prices = []
-                for i in range(rating_idx + 1, len(tds)):
-                    td_val = tds[i].strip()
-                    if td_val:  # Not empty
-                        price = self._extract_price(td_val)
-                        if price:
-                            prices.append(price)
-                            logger.debug(f"Extracted price from TD[{i}]: {price}")
-                
-                # Map rating to buy/hold/sell
-                if "買進" in rating or "強力買進" in rating:
-                    result["buy_count"] = result.get("buy_count", 0) + 1
-                elif "持有" in rating:
-                    result["hold_count"] = result.get("hold_count", 0) + 1
-                elif "賣出" in rating:
-                    result["sell_count"] = result.get("sell_count", 0) + 1
-                
-                # Store target prices
-                if prices:
-                    if "target_prices" not in result:
-                        result["target_prices"] = []
-                    result["target_prices"].extend(prices)
-            
-            logger.info(f"Total rating rows found for {stock_code}: {matches_found}")
-            
-            # Calculate aggregates if we found data
-            if "target_prices" in result and result["target_prices"]:
-                prices = result["target_prices"]
-                result["avg_target_price"] = sum(prices) / len(prices)
-                result["max_target_price"] = max(prices)
-                result["min_target_price"] = min(prices)
-                del result["target_prices"]
-                
-                # Set counts with defaults
-                result["buy_count"] = result.get("buy_count", 0)
-                result["hold_count"] = result.get("hold_count", 0)
-                result["sell_count"] = result.get("sell_count", 0)
-                
-                # Calculate rating score
-                total = result["buy_count"] + result["hold_count"] + result["sell_count"]
-                if total > 0:
-                    buy_ratio = result["buy_count"] / total
-                    result["rating_score"] = round(buy_ratio * 10, 1)
-                
-                logger.info(f"Successfully parsed ratings for {stock_code}: buy={result['buy_count']}, hold={result['hold_count']}, sell={result['sell_count']}, avg_price={result['avg_target_price']:.2f}")
+            if result and ("avg_target_price" in result or "buy_count" in result):
+                result["data_source"] = "Yahoo Finance"
+                logger.info(f"Fetched analyst data for {symbol}: {result}")
                 return result
             
-            logger.warning(f"No prices found for {stock_code}")
+            logger.warning(f"No analyst data available on Yahoo Finance for {symbol}")
             return None
-            
             
         except Exception as e:
-            logger.error(f"Error parsing CNYES HTML: {e}")
+            logger.error(f"yfinance error for {stock_code}: {e}")
             return None
-    
-    def _extract_price(self, text: str) -> Optional[float]:
-        """Extract numeric price from text, handling NT$ prefix and commas"""
-        if not text:
-            return None
-        
-        try:
-            # Remove HTML tags, links
-            text = re.sub(r'<[^>]+>', '', text)
-            # Remove NT$ prefix
-            text = text.replace('NT$', '').replace('NT￥', '').strip()
-            # Remove commas
-            text = text.replace(',', '')
-            
-            if text and text != '-' and text != '':
-                return float(text)
-        except (ValueError, TypeError):
-            pass
-        
+
+    # Legacy stubs (kept for interface compatibility)
+    def _parse_cnyes_ratings(self, html: str, stock_code: str) -> Optional[Dict]:
+        """Legacy method — no longer used"""
         return None
+
+    def _extract_price(self, text: str) -> Optional[float]:
+        """Legacy method — no longer used"""
+        return None
+
+    #     <TD>Price 1 (old target)</TD>
+    #     <TD>Price 2 (new target)</TD>
+    #     <TD>Current Price</TD>
+    # </TR>
 
 
 class TaiwanStockEPSRankingScraper:
