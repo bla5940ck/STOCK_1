@@ -12,7 +12,7 @@ from datetime import datetime
 from src.utils.logger import get_logger
 from src.config import get_settings
 from src.exceptions import APIError, TimeoutError as TimeoutException
-from src.integrations.goodinfo_scraper import get_taiwan_fundamentals_service
+from src.integrations.tw_fundamentals import get_taiwan_fundamentals_service
 
 logger = get_logger(__name__)
 
