@@ -147,8 +147,24 @@ class FundamentalDataService:
                     except (ValueError, TypeError):
                         pass
 
-                logger.info(f"Successfully fetched fundamentals for {symbol}")
-                return result if result else None
+                # Always enrich with fallback data to ensure completeness
+                if result:
+                    fallback = get_us_stock_fallback(symbol)
+                    if fallback:
+                        # Fill in missing fields from fallback
+                        for key, value in fallback.items():
+                            if key not in result:
+                                result[key] = value
+                    logger.info(f"Successfully fetched fundamentals for {symbol}: {result}")
+                    return result
+                else:
+                    # No data from API, use fallback
+                    fallback = get_us_stock_fallback(symbol)
+                    if fallback:
+                        logger.info(f"API returned empty data for {symbol}, using fallback data: {fallback}")
+                        return fallback
+                    logger.warning(f"No fundamentals available for {symbol}")
+                    return None
 
         except asyncio.TimeoutError:
             logger.warning(f"Alpha Vantage timeout for {symbol}, trying fallback")
@@ -201,13 +217,20 @@ class FundamentalDataService:
             fundamentals = await tw_service.get_fundamentals(stock_code)
             
             if fundamentals:
-                logger.info(f"Fetched Taiwan stock fundamentals for {stock_code}")
+                # Always enrich with fallback data if available
+                fallback = get_tw_stock_fallback(stock_code)
+                if fallback:
+                    # Fill in missing fields from fallback
+                    for key, value in fallback.items():
+                        if key not in fundamentals:
+                            fundamentals[key] = value
+                logger.info(f"Fetched Taiwan stock fundamentals for {stock_code}: {fundamentals}")
                 return fundamentals
             
             # Try fallback data if API returns nothing
             fallback = get_tw_stock_fallback(stock_code)
             if fallback:
-                logger.info(f"Using fallback data for Taiwan stock {stock_code}")
+                logger.info(f"API empty for Taiwan stock {stock_code}, using fallback data: {fallback}")
                 return fallback
             
             logger.warning(f"No fundamentals found for Taiwan stock {stock_code}")
