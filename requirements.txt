@@ -20,6 +20,7 @@ psycopg2-binary==2.9.9  # PostgreSQL adapter
 yfinance==0.2.32
 feedparser==6.0.10
 pytz==2024.1  # Timezone support
+playwright==1.40.0  # For JavaScript-rendered page scraping
 
 # Testing
 pytest==7.4.3

@@ -770,14 +770,7 @@ def format_tw_stock_price_message(
     # Add analyst ratings if available
     if analyst_ratings:
         lines.append("")
-        
-        # Determine source for display
-        source = analyst_ratings.get("source", "")
-        if source == "fallback":
-            lines.append("📈 投行評等 (CNYES - 參考數據):")
-        else:
-            lines.append("📈 投行評等 (CNYES):")
-        
+        lines.append("📈 投行評等 (CNYES):")
         if "buy_count" in analyst_ratings:
             lines.append(f"  評等: 買進 {analyst_ratings['buy_count']} | 持有 {analyst_ratings.get('hold_count', 0)} | 賣出 {analyst_ratings.get('sell_count', 0)}")
         if "rating_score" in analyst_ratings:

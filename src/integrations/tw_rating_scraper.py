@@ -1,9 +1,9 @@
 """
 Taiwan stock fundamentals scraper from CNYES and WantGoo.
 Fetches analyst ratings, target prices, and quarterly EPS rankings.
+Uses Playwright for JavaScript-rendered pages.
 """
 
-import aiohttp
 import asyncio
 from typing import Optional, Dict, List
 from datetime import datetime
@@ -15,38 +15,24 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Import fallback ratings at module level to avoid import issues
 try:
-    from src.utils.ratings_fallback import get_tw_stock_fallback_ratings
-except ImportError as e:
-    logger.warning(f"Could not import fallback ratings: {e}")
-    def get_tw_stock_fallback_ratings(code: str):
-        return {}
+    from playwright.async_api import async_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    logger.warning("Playwright not available, will use basic HTTP fallback")
+    PLAYWRIGHT_AVAILABLE = False
 
 
 class TaiwanStockRatingScraper:
-    """Scrape Taiwan stock ratings and price targets from CNYES"""
+    """Scrape Taiwan stock ratings and price targets from CNYES using Playwright"""
     
     def __init__(self):
-        self.session: Optional[aiohttp.ClientSession] = None
         self.base_url = "https://www.cnyes.com/twstock/board/ratediff.aspx"
         
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session"""
-        if self.session is None:
-            self.session = aiohttp.ClientSession()
-        return self.session
-    
-    async def close(self):
-        """Close session"""
-        if self.session:
-            await self.session.close()
-            self.session = None
-    
     async def get_analyst_ratings(self, stock_code: str) -> Optional[Dict]:
         """
         Get analyst ratings and target prices from CNYES.
-        Falls back to cached data if live scraping fails.
+        Uses Playwright to handle JavaScript-rendered content.
         
         Args:
             stock_code: Taiwan stock code (e.g., "2330")
@@ -60,81 +46,61 @@ class TaiwanStockRatingScraper:
             - 'max_target_price': Highest target price
             - 'min_target_price': Lowest target price
             - 'rating_score': Overall rating score (0-10)
-            - 'source': "live" or "fallback" indicating data source
             
-        Returns None if unable to fetch live data and no fallback available.
+        Returns None if unable to fetch.
         """
-        session = await self._get_session()
+        if not PLAYWRIGHT_AVAILABLE:
+            logger.warning("Playwright not available for CNYES scraping")
+            return None
         
         try:
-            # Try multiple URL formats for CNYES
-            urls = [
-                f"{self.base_url}?StockCode={stock_code}",  # Query parameter format
-                f"https://www.cnyes.com/twstock/board/rating/{stock_code}",  # Direct path format
-                f"https://www.cnyes.com/twstock/board/ratediff.aspx?StockCode={stock_code}",  # Explicit full URL
-            ]
-            
-            result = None
-            for url in urls:
-                try:
-                    async with session.get(
-                        url,
-                        timeout=aiohttp.ClientTimeout(total=8),
-                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-                    ) as response:
-                        if response.status != 200:
-                            logger.debug(f"CNYES URL returned {response.status}: {url}")
-                            continue
-                        
-                        html = await response.text()
-                        
-                        # Parse HTML to extract rating data
-                        result = self._parse_cnyes_ratings(html, stock_code)
-                        
-                        if result:
-                            result["source"] = "live"
-                            logger.info(f"Fetched analyst ratings for {stock_code} from {url}")
-                            return result
-                        else:
-                            logger.debug(f"Could not parse ratings from {url}")
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
                 
-                except asyncio.TimeoutError:
-                    logger.debug(f"CNYES timeout for {url}")
-                    continue
-                except Exception as e:
-                    logger.debug(f"Error fetching {url}: {e}")
-                    continue
-            
-            # If live scraping failed, try fallback data
-            logger.info(f"Live CNYES scraping failed for {stock_code}, attempting fallback")
-            fallback_result = self._get_fallback_ratings(stock_code)
-            if fallback_result:
-                logger.info(f"Using fallback ratings for {stock_code}")
-                return fallback_result
-            
-            logger.warning(f"Could not fetch analyst ratings from any source for {stock_code}")
-            return None
+                try:
+                    # Navigate to CNYES rating page
+                    url = f"{self.base_url}?StockCode={stock_code}"
+                    logger.info(f"Loading CNYES page: {url}")
+                    
+                    await page.goto(url, wait_until="networkidle", timeout=10000)
+                    
+                    # Wait for table to load
+                    await page.wait_for_selector("table tr", timeout=5000)
+                    
+                    # Get the rendered HTML
+                    html = await page.content()
+                    
+                    # Parse the HTML to extract ratings
+                    result = self._parse_cnyes_ratings(html, stock_code)
+                    
+                    if result:
+                        logger.info(f"Successfully scraped {stock_code} ratings from CNYES")
+                        return result
+                    else:
+                        logger.warning(f"Could not parse ratings for {stock_code} from rendered HTML")
+                        return None
+                
+                finally:
+                    await browser.close()
                     
         except Exception as e:
-            logger.error(f"Error in get_analyst_ratings for {stock_code}: {e}")
-            # Try fallback as last resort
-            return self._get_fallback_ratings(stock_code)
+            logger.error(f"Error scraping CNYES with Playwright for {stock_code}: {e}")
+            return None
     
     def _parse_cnyes_ratings(self, html: str, stock_code: str) -> Optional[Dict]:
         """
         Parse HTML content to extract analyst ratings for specific stock.
         
-        CNYES returns a table with all recent ratings:
+        CNYES table format:
         <TR>
-            <TD>20260519</TD>
-            <TD><a href>2330-台積電</a></TD>
-            <TD>Factset</TD>
-            <TD></TD>
-            <TD></TD>
-            <TD>買進</TD>
-            <TD>舊目標價</TD>
-            <TD>新目標價</TD>
-            <TD>其他價格</TD>
+            <TD>Date</TD>
+            <TD>Stock Code-Name</TD>
+            <TD>Firm</TD>
+            <TD>Rating (買進/強力買進/etc)</TD>
+            <TD>Price 1</TD>
+            <TD>Price 2</TD>
+            ...
         </TR>
         """
         try:
@@ -143,7 +109,6 @@ class TaiwanStockRatingScraper:
             # Debug: Check if HTML contains expected keywords
             if "買進" not in html and "持有" not in html and "賣出" not in html:
                 logger.warning(f"HTML doesn't contain rating keywords for {stock_code}")
-                logger.debug(f"HTML sample (first 500 chars): {html[:500]}")
                 return None
             
             if stock_code not in html:
@@ -161,41 +126,44 @@ class TaiwanStockRatingScraper:
                     continue
                 
                 matches_found += 1
-                logger.debug(f"Found row {matches_found} with stock code {stock_code}")
                 
                 # Extract all <TD>...</TD> values
                 td_pattern = r'<TD[^>]*>([^<]*)</TD>'
                 tds = re.findall(td_pattern, row)
                 
-                logger.debug(f"Extracted {len(tds)} TD values from row: {tds[:3]}...")  # Log first 3 TDs
+                logger.debug(f"Row {matches_found}: Found {len(tds)} TD values")
                 
-                if len(tds) < 8:
-                    logger.debug(f"Row has only {len(tds)} TD values, need at least 8")
+                if len(tds) < 4:
+                    logger.debug(f"Row has only {len(tds)} TD values, need at least 4")
                     continue
                 
-                # Expected format:
-                # [0] = date
-                # [1] = stock link (contains code and name)
-                # [2] = analyst firm
-                # [3] = blank
-                # [4] = blank  
-                # [5] = rating (買進/持有/賣出/強力買進)
-                # [6] = old target price
-                # [7] = new target price
-                # [8+] = other prices
+                # Find rating column (search through TDs for rating keywords)
+                rating = ""
+                rating_idx = -1
+                for i in range(len(tds)):
+                    if "買進" in tds[i] or "持有" in tds[i] or "賣出" in tds[i] or "強力" in tds[i]:
+                        rating = tds[i].strip()
+                        rating_idx = i
+                        break
                 
-                rating = tds[5].strip() if len(tds) > 5 else ""
-                old_price_str = tds[6].strip() if len(tds) > 6 else ""
-                new_price_str = tds[7].strip() if len(tds) > 7 else ""
+                if not rating or rating_idx == -1:
+                    logger.debug(f"No rating found in row")
+                    continue
                 
-                logger.debug(f"Rating: '{rating}', Old Price: '{old_price_str}', New Price: '{new_price_str}'")
+                logger.debug(f"Found rating: '{rating}' at index {rating_idx}")
                 
-                # Extract price from strings (remove links, HTML, etc.)
-                old_price = self._extract_price(old_price_str)
-                new_price = self._extract_price(new_price_str)
+                # Extract prices - look for numeric values after rating
+                prices = []
+                for i in range(rating_idx + 1, len(tds)):
+                    td_val = tds[i].strip()
+                    if td_val:  # Not empty
+                        price = self._extract_price(td_val)
+                        if price:
+                            prices.append(price)
+                            logger.debug(f"Extracted price from TD[{i}]: {price}")
                 
                 # Map rating to buy/hold/sell
-                if "買進" in rating:
+                if "買進" in rating or "強力買進" in rating:
                     result["buy_count"] = result.get("buy_count", 0) + 1
                 elif "持有" in rating:
                     result["hold_count"] = result.get("hold_count", 0) + 1
@@ -203,35 +171,38 @@ class TaiwanStockRatingScraper:
                     result["sell_count"] = result.get("sell_count", 0) + 1
                 
                 # Store target prices
-                if new_price:
+                if prices:
                     if "target_prices" not in result:
                         result["target_prices"] = []
-                    result["target_prices"].append(new_price)
-                elif old_price:
-                    if "target_prices" not in result:
-                        result["target_prices"] = []
-                    result["target_prices"].append(old_price)
+                    result["target_prices"].extend(prices)
+            
+            logger.info(f"Total rating rows found for {stock_code}: {matches_found}")
             
             # Calculate aggregates if we found data
-            if result or "target_prices" in result:
-                # Calculate average target price
-                if "target_prices" in result and result["target_prices"]:
-                    prices = result["target_prices"]
-                    result["avg_target_price"] = sum(prices) / len(prices)
-                    result["max_target_price"] = max(prices)
-                    result["min_target_price"] = min(prices)
-                    del result["target_prices"]
+            if "target_prices" in result and result["target_prices"]:
+                prices = result["target_prices"]
+                result["avg_target_price"] = sum(prices) / len(prices)
+                result["max_target_price"] = max(prices)
+                result["min_target_price"] = min(prices)
+                del result["target_prices"]
+                
+                # Set counts with defaults
+                result["buy_count"] = result.get("buy_count", 0)
+                result["hold_count"] = result.get("hold_count", 0)
+                result["sell_count"] = result.get("sell_count", 0)
                 
                 # Calculate rating score
-                total = result.get("buy_count", 0) + result.get("hold_count", 0) + result.get("sell_count", 0)
+                total = result["buy_count"] + result["hold_count"] + result["sell_count"]
                 if total > 0:
-                    buy_ratio = result.get("buy_count", 0) / total
+                    buy_ratio = result["buy_count"] / total
                     result["rating_score"] = round(buy_ratio * 10, 1)
                 
-                if result:
-                    return result
+                logger.info(f"Successfully parsed ratings for {stock_code}: buy={result['buy_count']}, hold={result['hold_count']}, sell={result['sell_count']}, avg_price={result['avg_target_price']:.2f}")
+                return result
             
+            logger.warning(f"No prices found for {stock_code}")
             return None
+            
             
         except Exception as e:
             logger.error(f"Error parsing CNYES HTML: {e}")
@@ -254,19 +225,6 @@ class TaiwanStockRatingScraper:
                 return float(text)
         except (ValueError, TypeError):
             pass
-        
-        return None
-    
-    def _get_fallback_ratings(self, stock_code: str) -> Optional[Dict]:
-        """Get fallback analyst ratings for a stock"""
-        try:
-            fallback = get_tw_stock_fallback_ratings(stock_code)
-            if fallback:
-                fallback["source"] = "fallback"
-                logger.debug(f"Returning fallback ratings for {stock_code}")
-                return fallback
-        except Exception as e:
-            logger.debug(f"Error loading fallback ratings: {e}")
         
         return None
 
