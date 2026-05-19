@@ -57,36 +57,49 @@ class TaiwanStockRatingScraper:
         session = await self._get_session()
         
         try:
-            # CNYES has query parameter for stock code
-            params = {"StockCode": stock_code}
+            # Try multiple URL formats for CNYES
+            urls = [
+                f"{self.base_url}?StockCode={stock_code}",  # Query parameter format
+                f"https://www.cnyes.com/twstock/board/rating/{stock_code}",  # Direct path format
+                f"https://www.cnyes.com/twstock/board/ratediff.aspx?StockCode={stock_code}",  # Explicit full URL
+            ]
             
-            async with session.get(
-                self.base_url, 
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=10),
-                headers={"User-Agent": "Mozilla/5.0"}
-            ) as response:
-                if response.status != 200:
-                    logger.warning(f"CNYES API error for {stock_code}: {response.status}")
-                    return None
+            result = None
+            for url in urls:
+                try:
+                    async with session.get(
+                        url,
+                        timeout=aiohttp.ClientTimeout(total=8),
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                    ) as response:
+                        if response.status != 200:
+                            logger.debug(f"CNYES URL returned {response.status}: {url}")
+                            continue
+                        
+                        html = await response.text()
+                        
+                        # Parse HTML to extract rating data
+                        result = self._parse_cnyes_ratings(html, stock_code)
+                        
+                        if result:
+                            logger.info(f"Fetched analyst ratings for {stock_code} from {url}")
+                            return result
+                        else:
+                            logger.debug(f"Could not parse ratings from {url}")
                 
-                html = await response.text()
-                
-                # Parse HTML to extract rating data
-                result = self._parse_cnyes_ratings(html, stock_code)
-                
-                if result:
-                    logger.info(f"Fetched analyst ratings for {stock_code}: {result}")
-                    return result
-                else:
-                    logger.warning(f"Could not parse ratings for {stock_code}")
-                    return None
-                    
-        except asyncio.TimeoutError:
-            logger.warning(f"CNYES timeout for {stock_code}")
+                except asyncio.TimeoutError:
+                    logger.debug(f"CNYES timeout for {url}")
+                    continue
+                except Exception as e:
+                    logger.debug(f"Error fetching {url}: {e}")
+                    continue
+            
+            if not result:
+                logger.warning(f"Could not fetch analyst ratings from any CNYES URL for {stock_code}")
             return None
+                    
         except Exception as e:
-            logger.error(f"Error fetching CNYES ratings for {stock_code}: {e}")
+            logger.error(f"Error in get_analyst_ratings for {stock_code}: {e}")
             return None
     
     def _parse_cnyes_ratings(self, html: str, stock_code: str) -> Optional[Dict]:
