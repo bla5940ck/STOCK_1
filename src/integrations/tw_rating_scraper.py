@@ -15,6 +15,14 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Import fallback ratings at module level to avoid import issues
+try:
+    from src.utils.ratings_fallback import get_tw_stock_fallback_ratings
+except ImportError as e:
+    logger.warning(f"Could not import fallback ratings: {e}")
+    def get_tw_stock_fallback_ratings(code: str):
+        return {}
+
 
 class TaiwanStockRatingScraper:
     """Scrape Taiwan stock ratings and price targets from CNYES"""
@@ -252,8 +260,6 @@ class TaiwanStockRatingScraper:
     def _get_fallback_ratings(self, stock_code: str) -> Optional[Dict]:
         """Get fallback analyst ratings for a stock"""
         try:
-            from src.utils.ratings_fallback import get_tw_stock_fallback_ratings
-            
             fallback = get_tw_stock_fallback_ratings(stock_code)
             if fallback:
                 fallback["source"] = "fallback"
