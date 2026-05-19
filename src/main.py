@@ -125,6 +125,27 @@ def create_app() -> FastAPI:
             "timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
+    # Debug endpoint: Test Taiwan stock analyst data from yfinance
+    @app.get("/debug/analyst/{stock_code}")
+    async def debug_analyst(stock_code: str):
+        """Debug endpoint to check yfinance analyst data"""
+        try:
+            from src.integrations.tw_rating_scraper import TaiwanStockRatingScraper
+            scraper = TaiwanStockRatingScraper()
+            result = await scraper.get_analyst_ratings(stock_code)
+            return {
+                "stock_code": stock_code,
+                "analyst_data": result,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+            }
+        except Exception as e:
+            app_logger.error(f"Debug analyst endpoint error: {e}", exc_info=True)
+            return {
+                "error": str(e),
+                "stock_code": stock_code,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+            }
+
     # Webhook endpoint with signature verification
     @app.post("/webhook/line")
     async def line_webhook(

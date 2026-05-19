@@ -53,11 +53,13 @@ class TaiwanStockRatingScraper:
         """Return current USD/TWD exchange rate; falls back to 32.0 on failure."""
         try:
             fx = yf.Ticker("USDTWD=X")
-            rate = fx.fast_info.last_price
+            info = fx.info or {}
+            # Try multiple possible keys for price in yfinance
+            rate = info.get("regularMarketPrice") or info.get("currentPrice") or info.get("bid")
             if rate and 25.0 < float(rate) < 45.0:
                 return float(rate)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Could not fetch USD/TWD rate: {e}")
         return 32.0
 
     def _extract_from_info(self, info: dict, usd_rate: float = 1.0) -> dict:
