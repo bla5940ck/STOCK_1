@@ -12,6 +12,7 @@ from datetime import datetime
 from src.utils.logger import get_logger
 from src.config import get_settings
 from src.exceptions import APIError, TimeoutError as TimeoutException
+from src.integrations.goodinfo_scraper import get_taiwan_fundamentals_service
 
 logger = get_logger(__name__)
 
@@ -31,10 +32,17 @@ class FundamentalDataService:
         return self.session
 
     async def close(self):
-        """Close session"""
+        """Close sessions"""
         if self.session:
             await self.session.close()
             self.session = None
+        
+        # Clean up Taiwan fundamentals service
+        try:
+            tw_service = await get_taiwan_fundamentals_service()
+            await tw_service.close()
+        except Exception as e:
+            logger.warning(f"Error closing Taiwan fundamentals service: {e}")
 
     async def get_us_stock_fundamentals(self, symbol: str) -> Optional[Dict]:
         """
@@ -153,10 +161,10 @@ class FundamentalDataService:
 
     async def get_tw_stock_fundamentals(self, stock_code: str, current_price: Decimal) -> Optional[Dict]:
         """
-        Fetch Taiwan stock fundamental data from available sources.
+        Fetch Taiwan stock fundamental data from GOODINFO scraper.
         
-        Currently uses basic calculations from price data.
-        Future: Integrate with GOODINFO or other Taiwan finance APIs.
+        Gets real-time P/E, EPS, dividend yield, payout ratio, and ROE.
+        No hardcoding - everything comes from live web sources.
         
         Args:
             stock_code: Taiwan stock code (e.g., "2330")
@@ -164,20 +172,28 @@ class FundamentalDataService:
             
         Returns:
             Dict with keys:
-            - 'pe_ratio': P/E ratio (float, estimated)
-            - 'dividend_yield': Dividend yield % (float, if available)
-            - 'market_cap': Market cap in millions (float)
+            - 'pe_ratio': P/E ratio (float)
+            - 'eps': EPS (float)
+            - 'dividend_yield': Dividend yield % (float)
+            - 'payout_ratio': Payout ratio % (float)
+            - 'roe': Return on equity % (float)
             
-        Returns None if unable to calculate.
+        Returns None if unable to fetch.
         """
-        # For now, return a placeholder encouraging API integration
-        # This can be enhanced with Taiwan-specific APIs like:
-        # - GOODINFO (https://goodinfo.tw)
-        # - Moneydj (https://www.moneydj.com)
-        # - Taiwan Finance API
-        
-        logger.info(f"Taiwan fundamentals for {stock_code} - recommend integrating GOODINFO or TWSEOpen APIs")
-        return None
+        try:
+            tw_service = await get_taiwan_fundamentals_service()
+            fundamentals = await tw_service.get_fundamentals(stock_code)
+            
+            if fundamentals:
+                logger.info(f"Fetched Taiwan stock fundamentals for {stock_code}")
+                return fundamentals
+            else:
+                logger.warning(f"No fundamentals found for Taiwan stock {stock_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error fetching Taiwan fundamentals for {stock_code}: {e}")
+            return None
 
     async def format_fundamentals(
         self,

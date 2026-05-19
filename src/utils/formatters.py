@@ -734,11 +734,17 @@ def format_tw_stock_price_message(
     # Add fundamental data if available
     if fundamentals:
         lines.append("")
-        lines.append("📊 基本面數據 (實時):")
+        lines.append("📊 基本面數據 (即時 GOODINFO):")
         if "pe_ratio" in fundamentals:
-            lines.append(f"  P/E比: {fundamentals['pe_ratio']:.1f}x")
+            lines.append(f"  本益比 (P/E): {fundamentals['pe_ratio']:.1f}x")
+        if "eps" in fundamentals:
+            lines.append(f"  每股盈餘 (EPS): NT${fundamentals['eps']:.2f}")
         if "dividend_yield" in fundamentals:
             lines.append(f"  股息殖利率: {fundamentals['dividend_yield']:.2f}%")
+        if "payout_ratio" in fundamentals:
+            lines.append(f"  配息率: {fundamentals['payout_ratio']:.1f}%")
+        if "roe" in fundamentals:
+            lines.append(f"  股東權益報酬率 (ROE): {fundamentals['roe']:.1f}%")
     
     # Note: Remove inaccurate static valuation analysis for Taiwan stocks too
     lines.append("")
