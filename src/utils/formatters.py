@@ -12,8 +12,6 @@ from src.models.domain import (
     Index, Stock, NewsArticle, TaiwanStock, 
     IndexQueryResponse, StockQueryResponse, NewsQueryResponse
 )
-from src.utils.valuation import get_valuation_assessment
-from src.utils.stock_fundamentals import build_valuation_analysis
 
 
 def clean_html(text: str) -> str:
@@ -417,43 +415,36 @@ def format_stock_message(stock: Stock, news_articles: Optional[List[NewsArticle]
         color_indicator = "⚪"  # White for no change
         direction = "→"
     
-    price_line = f"現價: ${stock.current_price} {color_indicator}{direction}{change_percent_str}% "
-    price_line += f"(前收: ${stock.previous_close})"
+    price_line = f"💰 現價: ${stock.current_price} {color_indicator}{direction}{change_percent_str}%"
     lines.append(price_line)
+    
+    lines.append(f"📍 前收: ${stock.previous_close}")
 
     # Market status indicator for US stocks
     from src.utils.market_hours import is_us_market_open
     market_status = is_us_market_open()
     lines.append(market_status['display_status'])
-
-    # Price range info (open, high, low)
-    price_range_parts = []
-    if stock.open_price:
-        price_range_parts.append(f"開盤: ${stock.open_price}")
-    if stock.high_price:
-        price_range_parts.append(f"最高: ${stock.high_price}")
-    if stock.low_price:
-        price_range_parts.append(f"最低: ${stock.low_price}")
-    
-    if price_range_parts:
-        lines.append(" | ".join(price_range_parts))
-
-    # Additional info
-    info_parts = []
-    if stock.market_cap_billion:
-        info_parts.append(f"市值: ${stock.market_cap_billion}B")
-    if stock.pe_ratio:
-        info_parts.append(f"PE比: {stock.pe_ratio}")
-    if stock.dividend_yield:
-        info_parts.append(f"股息: {stock.dividend_yield}%")
-
-    if info_parts:
-        lines.append(" | ".join(info_parts))
-
-    # Comprehensive valuation analysis based on P/E ratios
     lines.append("")
-    valuation_analysis = build_valuation_analysis(stock.code, Decimal(str(stock.current_price)))
-    lines.append(valuation_analysis)
+
+    # Price range info (open, high, low) - one per line
+    if stock.open_price:
+        lines.append(f"🔓 開盤價: ${stock.open_price}")
+    if stock.high_price:
+        lines.append(f"📈 最高價: ${stock.high_price}")
+    if stock.low_price:
+        lines.append(f"📉 最低價: ${stock.low_price}")
+
+    # Additional info - one per line
+    if stock.market_cap_billion:
+        lines.append(f"💼 市值: ${stock.market_cap_billion}B")
+    if stock.pe_ratio:
+        lines.append(f"📊 PE比: {stock.pe_ratio}")
+    if stock.dividend_yield:
+        lines.append(f"💵 股息殖利率: {stock.dividend_yield}%")
+
+    # Note: Remove inaccurate static valuation analysis
+    lines.append("")
+    lines.append("ℹ️ 💡提示: 目標價和 EPS 為估算值，請查詢最新投資研報以獲得準確信息")
 
     # News section
     if news_articles:
@@ -696,23 +687,22 @@ def format_tw_stock_price_message(stock_data: dict, news_articles: Optional[List
         except (TypeError, ValueError):
             return str(val)
 
-    lines.append(f"現價: {fmt_price(current_price)}")
-    lines.append(f"漲幅: {color_indicator}{direction}{change_percent_str}%")
-    lines.append(f"前收: {fmt_price(previous_close)}")
-    lines.append(f"開盤: {fmt_price(stock_data.get('open_price', 0))}")
-    lines.append(f"最高: {fmt_price(stock_data.get('high_price', 0))}")
-    lines.append(f"最低: {fmt_price(stock_data.get('low_price', 0))}")
+    lines.append(f"💰 現價: {fmt_price(current_price)}")
+    lines.append(f"📊 漲幅: {color_indicator}{direction}{change_percent_str}%")
+    lines.append(f"📍 前收: {fmt_price(previous_close)}")
+    lines.append(f"🔓 開盤: {fmt_price(stock_data.get('open_price', 0))}")
+    lines.append(f"📈 最高: {fmt_price(stock_data.get('high_price', 0))}")
+    lines.append(f"📉 最低: {fmt_price(stock_data.get('low_price', 0))}")
     
     # Trading volume
     volume = stock_data.get("volume", 0)
     if volume > 0:
         volume_str = f"{volume:,.0f}" if volume >= 1000 else str(volume)
-        lines.append(f"成交量: {volume_str}")
+        lines.append(f"📋 成交量: {volume_str}")
     
-    # Comprehensive valuation analysis based on P/E ratios
+    # Note: Remove inaccurate static valuation analysis for Taiwan stocks too
     lines.append("")
-    valuation_analysis = build_valuation_analysis(code, current_price)
-    lines.append(valuation_analysis)
+    lines.append("ℹ️ 💡提示: 台股數據為即時行情，建議查詢最新投資報告獲得準確分析")
     
     # News section
     if news_articles:
