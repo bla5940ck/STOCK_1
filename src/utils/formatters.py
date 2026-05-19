@@ -783,6 +783,11 @@ def format_tw_stock_price_message(
             lines.append(f"  最高目標價: NT${int(analyst_ratings['max_target_price']):,}")
         if "min_target_price" in analyst_ratings:
             lines.append(f"  最低目標價: NT${int(analyst_ratings['min_target_price']):,}")
+    else:
+        # Show message when analyst ratings are unavailable
+        lines.append("")
+        lines.append("📊 分析師評等: 暫無公開資料")
+        lines.append("  (Yahoo Finance 對部分台股股票的分析師評等資料限制)")
     
     # Note: Remove inaccurate static valuation analysis for Taiwan stocks too
     lines.append("")
