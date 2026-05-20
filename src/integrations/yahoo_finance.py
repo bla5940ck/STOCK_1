@@ -8,9 +8,10 @@ from typing import Dict, Optional, Tuple
 from decimal import Decimal
 from datetime import datetime
 import random
+import re
 
 from src.models.domain import Index, Stock, DataSourceEnum
-from src.exceptions import APIError, TimeoutError
+from src.exceptions import APIError, TimeoutError as TimeoutException
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -41,6 +42,70 @@ class YahooFinanceClient:
 
     def __init__(self):
         self.session: Optional[aiohttp.ClientSession] = None
+        self.crumb: Optional[str] = None
+        self.cookies: Optional[aiohttp.CookieJar] = None
+
+    async def _get_crumb(self) -> str:
+        """
+        Get crumb token from Yahoo Finance.
+        Yahoo Finance requires a crumb for API access to prevent unauthorized use.
+        
+        Returns:
+            Crumb token string
+            
+        Raises:
+            APIError: If unable to extract crumb
+        """
+        if self.crumb:
+            logger.info("Using cached crumb token")
+            return self.crumb
+        
+        session = await self._get_session()
+        
+        try:
+            logger.info("Fetching new crumb token from Yahoo Finance...")
+            headers = {"User-Agent": self._get_random_user_agent()}
+            
+            # Access Yahoo Finance home page to get cookies and crumb
+            async with session.get(
+                "https://finance.yahoo.com",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status != 200:
+                    raise APIError(
+                        error_code="E003_API_ERROR",
+                        message=f"Failed to fetch Yahoo Finance home page: {resp.status}"
+                    )
+                
+                html = await resp.text()
+                
+                # Extract crumb from JavaScript in the HTML
+                # Yahoo Finance stores crumb in the HTML as: "crumb":"YOUR_CRUMB_VALUE"
+                crumb_match = re.search(r'"crumb":"([^"]+)"', html)
+                
+                if not crumb_match:
+                    logger.error("Could not extract crumb from Yahoo Finance HTML")
+                    raise APIError(
+                        error_code="E003_API_ERROR",
+                        message="Unable to extract security token from Yahoo Finance"
+                    )
+                
+                self.crumb = crumb_match.group(1)
+                logger.info(f"Successfully obtained crumb token: {self.crumb[:20]}...")
+                return self.crumb
+                
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                error_code="E001_TIMEOUT",
+                message="Timeout while fetching crumb from Yahoo Finance"
+            )
+        except aiohttp.ClientError as e:
+            logger.error(f"Connection error while fetching crumb: {e}")
+            raise APIError(
+                error_code="E003_API_ERROR",
+                message=f"Failed to connect to Yahoo Finance: {str(e)}"
+            )
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session"""
@@ -74,17 +139,22 @@ class YahooFinanceClient:
         """
         session = await self._get_session()
         
-        url = f"{self.BASE_URL}/v10/finance/quoteSummary/{symbol}"
-        params = {
-            "modules": "price",
-        }
-        
-        headers = {
-            "User-Agent": self._get_random_user_agent(),
-        }
-
         try:
-            logger.info(f"Fetching index {symbol} from Yahoo Finance (timeout: {self.TIMEOUT}s)")
+            # Get crumb first
+            crumb = await self._get_crumb()
+            
+            url = f"{self.BASE_URL}/v10/finance/quoteSummary/{symbol}"
+            params = {
+                "modules": "price",
+                "crumb": crumb,  # Add crumb to request
+            }
+            
+            headers = {
+                "User-Agent": self._get_random_user_agent(),
+                "Referer": "https://finance.yahoo.com",
+            }
+
+            logger.info(f"Fetching index {symbol} from Yahoo Finance with crumb (timeout: {self.TIMEOUT}s)")
             async with session.get(
                 url,
                 params=params,
@@ -93,7 +163,8 @@ class YahooFinanceClient:
             ) as response:
                 logger.info(f"Yahoo Finance response status for {symbol}: {response.status}")
                 if response.status != 200:
-                    logger.error(f"Yahoo Finance API error for {symbol}: {response.status}")
+                    text = await response.text()
+                    logger.error(f"Yahoo Finance API error for {symbol}: {response.status} - {text[:200]}")
                     raise APIError(
                         error_code="E003_API_ERROR",
                         message=f"Yahoo Finance 返回錯誤狀態碼：{response.status}"
@@ -103,9 +174,9 @@ class YahooFinanceClient:
                 logger.info(f"Successfully parsed JSON for {symbol}")
                 return self._parse_index_response(symbol, data)
 
-        except asyncio.TimeoutError as e:
+        except (asyncio.TimeoutError, TimeoutException) as e:
             logger.error(f"Yahoo Finance timeout for {symbol}: {str(e)}")
-            raise TimeoutError(
+            raise TimeoutException(
                 error_code="E001_TIMEOUT",
                 message=f"Yahoo Finance API 響應超時（{self.TIMEOUT} 秒內無回應）"
             )
@@ -126,6 +197,12 @@ class YahooFinanceClient:
             raise APIError(
                 error_code="E003_API_ERROR",
                 message=f"Yahoo Finance 請求失敗：{str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error fetching index {symbol}: {str(e)}")
+            raise APIError(
+                error_code="E003_API_ERROR",
+                message=f"無法取得指數數據：{str(e)}"
             )
 
     async def fetch_indices(self, symbols: list[str]) -> Dict[str, Index]:
@@ -227,16 +304,22 @@ class YahooFinanceClient:
         """
         session = await self._get_session()
         
-        url = f"{self.BASE_URL}/v10/finance/quoteSummary/{symbol.upper()}"
-        params = {
-            "modules": "price,summaryDetail,assetProfile",
-        }
-        
-        headers = {
-            "User-Agent": self._get_random_user_agent(),
-        }
-
         try:
+            # Get crumb first
+            crumb = await self._get_crumb()
+            
+            url = f"{self.BASE_URL}/v10/finance/quoteSummary/{symbol.upper()}"
+            params = {
+                "modules": "price,summaryDetail,assetProfile",
+                "crumb": crumb,  # Add crumb to request
+            }
+            
+            headers = {
+                "User-Agent": self._get_random_user_agent(),
+                "Referer": "https://finance.yahoo.com",
+            }
+
+            logger.info(f"Fetching stock {symbol} from Yahoo Finance with crumb")
             async with session.get(
                 url,
                 params=params,
@@ -244,7 +327,8 @@ class YahooFinanceClient:
                 timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
             ) as response:
                 if response.status != 200:
-                    logger.error(f"Yahoo Finance API error for {symbol}: {response.status}")
+                    text = await response.text()
+                    logger.error(f"Yahoo Finance API error for {symbol}: {response.status} - {text[:200]}")
                     raise APIError(
                         error_code="E003_API_ERROR",
                         message=f"Yahoo Finance 返回錯誤狀態碼：{response.status}"
@@ -253,11 +337,11 @@ class YahooFinanceClient:
                 data = await response.json()
                 return self._parse_stock_response(symbol, data)
 
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, TimeoutException):
             logger.error(f"Yahoo Finance timeout for {symbol}")
-            raise TimeoutError(
+            raise TimeoutException(
                 error_code="E001_TIMEOUT",
-                message="Yahoo Finance API 響應超時（5 秒內無回應）"
+                message=f"Yahoo Finance API 響應超時（{self.TIMEOUT} 秒內無回應）"
             )
         except aiohttp.ClientError as e:
             logger.error(f"Yahoo Finance connection error for {symbol}: {e}")
