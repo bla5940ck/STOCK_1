@@ -9,6 +9,7 @@ from decimal import Decimal
 from datetime import datetime
 import random
 import re
+import requests
 
 from src.models.domain import Index, Stock, DataSourceEnum
 from src.exceptions import APIError, TimeoutError as TimeoutException
@@ -40,15 +41,13 @@ class YahooFinanceClient:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
     ]
 
-    def __init__(self):
-        self.session: Optional[aiohttp.ClientSession] = None
-        self.crumb: Optional[str] = None
-        self.cookies: Optional[aiohttp.CookieJar] = None
-
     async def _get_crumb(self) -> str:
         """
         Get crumb token from Yahoo Finance.
         Yahoo Finance requires a crumb for API access to prevent unauthorized use.
+        
+        Uses requests library (sync) for initial page fetch to handle large headers,
+        which aiohttp has issues with.
         
         Returns:
             Crumb token string
@@ -60,57 +59,87 @@ class YahooFinanceClient:
             logger.info("Using cached crumb token")
             return self.crumb
         
-        session = await self._get_session()
-        
         try:
-            logger.info("Fetching new crumb token from Yahoo Finance...")
+            logger.info("Fetching crumb token from Yahoo Finance...")
             headers = {"User-Agent": self._get_random_user_agent()}
             
-            # Access Yahoo Finance home page to get cookies and crumb
-            async with session.get(
+            # Use requests (sync) instead of aiohttp (async) because:
+            # Yahoo Finance returns large Set-Cookie headers (8KB+)
+            # that exceed aiohttp's default buffer limits
+            response = requests.get(
                 "https://finance.yahoo.com",
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                if resp.status != 200:
-                    raise APIError(
-                        error_code="E003_API_ERROR",
-                        message=f"Failed to fetch Yahoo Finance home page: {resp.status}"
-                    )
-                
-                html = await resp.text()
-                
-                # Extract crumb from JavaScript in the HTML
-                # Yahoo Finance stores crumb in the HTML as: "crumb":"YOUR_CRUMB_VALUE"
-                crumb_match = re.search(r'"crumb":"([^"]+)"', html)
-                
-                if not crumb_match:
-                    logger.error("Could not extract crumb from Yahoo Finance HTML")
-                    raise APIError(
-                        error_code="E003_API_ERROR",
-                        message="Unable to extract security token from Yahoo Finance"
-                    )
-                
-                self.crumb = crumb_match.group(1)
-                logger.info(f"Successfully obtained crumb token: {self.crumb[:20]}...")
-                return self.crumb
-                
-        except asyncio.TimeoutError:
-            raise TimeoutError(
+                timeout=15,
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Yahoo Finance home page returned {response.status_code}")
+                raise APIError(
+                    error_code="E003_API_ERROR",
+                    message=f"Failed to fetch Yahoo Finance: {response.status_code}"
+                )
+            
+            html = response.text
+            
+            # Extract crumb from JavaScript in the HTML
+            # Yahoo Finance stores crumb in the HTML as: "crumb":"YOUR_CRUMB_VALUE"
+            crumb_match = re.search(r'"crumb":"([^"]+)"', html)
+            
+            if not crumb_match:
+                logger.error("Could not extract crumb from Yahoo Finance HTML")
+                raise APIError(
+                    error_code="E003_API_ERROR",
+                    message="Unable to extract security token from Yahoo Finance"
+                )
+            
+            self.crumb = crumb_match.group(1)
+            logger.info(f"Successfully obtained crumb token: {self.crumb[:20]}...")
+            return self.crumb
+            
+        except requests.Timeout:
+            logger.error("Timeout while fetching crumb from Yahoo Finance")
+            raise TimeoutException(
                 error_code="E001_TIMEOUT",
                 message="Timeout while fetching crumb from Yahoo Finance"
             )
-        except aiohttp.ClientError as e:
+        except requests.RequestException as e:
             logger.error(f"Connection error while fetching crumb: {e}")
             raise APIError(
                 error_code="E003_API_ERROR",
                 message=f"Failed to connect to Yahoo Finance: {str(e)}"
             )
+        except Exception as e:
+            logger.error(f"Unexpected error fetching crumb: {e}")
+            raise APIError(
+                error_code="E003_API_ERROR",
+                message=f"Failed to get crumb: {str(e)}"
+            )
+
+    def __init__(self):
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.crumb: Optional[str] = None
+        self.cookies: Optional[aiohttp.CookieJar] = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session"""
+        """Get or create aiohttp session with proper connector settings"""
         if self.session is None:
-            self.session = aiohttp.ClientSession()
+            # Create connector with larger buffer for Yahoo Finance
+            # Yahoo Finance returns large Set-Cookie headers (8KB+)
+            connector = aiohttp.TCPConnector(
+                limit_per_host=5,
+                ssl=True,
+                # Increase read buffer from default 2048 to 64KB to handle large headers
+                read_bufsize=65536,
+            )
+            
+            # Create session
+            self.session = aiohttp.ClientSession(
+                connector=connector,
+                # Use custom timeout handler
+                timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
+            )
+            
+            logger.info("Created aiohttp session with larger buffers for Yahoo Finance")
         return self.session
 
     async def close(self):
