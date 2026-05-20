@@ -27,8 +27,8 @@ class YahooFinanceClient:
     """Yahoo Finance API client for fetching market data"""
 
     BASE_URL = "https://query1.finance.yahoo.com"
-    TIMEOUT = 5.0  # 5 second timeout
-    RATE_LIMIT_DELAY = 1.0  # 1 second between calls
+    TIMEOUT = 15.0  # 15 second timeout (increased from 5 for Render stability)
+    RATE_LIMIT_DELAY = 2.0  # 2 seconds between calls
     
     # User-Agent rotation to bypass anti-bot measures
     USER_AGENTS = [
@@ -84,12 +84,14 @@ class YahooFinanceClient:
         }
 
         try:
+            logger.info(f"Fetching index {symbol} from Yahoo Finance (timeout: {self.TIMEOUT}s)")
             async with session.get(
                 url,
                 params=params,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
             ) as response:
+                logger.info(f"Yahoo Finance response status for {symbol}: {response.status}")
                 if response.status != 200:
                     logger.error(f"Yahoo Finance API error for {symbol}: {response.status}")
                     raise APIError(
@@ -98,19 +100,32 @@ class YahooFinanceClient:
                     )
 
                 data = await response.json()
+                logger.info(f"Successfully parsed JSON for {symbol}")
                 return self._parse_index_response(symbol, data)
 
-        except asyncio.TimeoutError:
-            logger.error(f"Yahoo Finance timeout for {symbol}")
+        except asyncio.TimeoutError as e:
+            logger.error(f"Yahoo Finance timeout for {symbol}: {str(e)}")
             raise TimeoutError(
                 error_code="E001_TIMEOUT",
-                message="Yahoo Finance API 響應超時（5 秒內無回應）"
+                message=f"Yahoo Finance API 響應超時（{self.TIMEOUT} 秒內無回應）"
             )
-        except aiohttp.ClientError as e:
-            logger.error(f"Yahoo Finance connection error for {symbol}: {e}")
+        except aiohttp.ClientSSLError as e:
+            logger.error(f"Yahoo Finance SSL error for {symbol}: {str(e)}")
             raise APIError(
                 error_code="E003_API_ERROR",
-                message=f"無法連接 Yahoo Finance：{str(e)}"
+                message=f"SSL 連接錯誤：{str(e)}"
+            )
+        except aiohttp.ClientConnectorError as e:
+            logger.error(f"Yahoo Finance connection error for {symbol}: {str(e)}")
+            raise APIError(
+                error_code="E003_API_ERROR",
+                message=f"無法連接 Yahoo Finance 伺服器：{str(e)}"
+            )
+        except aiohttp.ClientError as e:
+            logger.error(f"Yahoo Finance client error for {symbol}: {str(e)}")
+            raise APIError(
+                error_code="E003_API_ERROR",
+                message=f"Yahoo Finance 請求失敗：{str(e)}"
             )
 
     async def fetch_indices(self, symbols: list[str]) -> Dict[str, Index]:
