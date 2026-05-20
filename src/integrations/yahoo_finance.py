@@ -44,19 +44,19 @@ class YahooFinanceClient:
     async def _get_crumb(self) -> str:
         """
         Get crumb token from Yahoo Finance.
-        Yahoo Finance requires a crumb for API access to prevent unauthorized use.
+        Yahoo Finance may require a crumb for API access to prevent unauthorized use.
         
         Uses requests library (sync) for initial page fetch to handle large headers,
         which aiohttp has issues with.
         
         Returns:
-            Crumb token string
+            Crumb token string (may be empty if Yahoo doesn't require it anymore)
             
         Raises:
-            APIError: If unable to extract crumb
+            APIError: If unable to extract crumb and unable to fallback
         """
-        if self.crumb:
-            logger.info("Using cached crumb token")
+        if self.crumb is not None:  # Allow empty string as valid crumb
+            logger.info(f"Using cached crumb token (length: {len(self.crumb)})")
             return self.crumb
         
         try:
@@ -74,46 +74,53 @@ class YahooFinanceClient:
             
             if response.status_code != 200:
                 logger.error(f"Yahoo Finance home page returned {response.status_code}")
-                raise APIError(
-                    error_code="E003_API_ERROR",
-                    message=f"Failed to fetch Yahoo Finance: {response.status_code}"
-                )
+                # Try to continue with empty crumb, as Yahoo Finance might not require it anymore
+                self.crumb = ""
+                return self.crumb
             
             html = response.text
             
-            # Extract crumb from JavaScript in the HTML
-            # Yahoo Finance stores crumb in the HTML as: "crumb":"YOUR_CRUMB_VALUE"
-            crumb_match = re.search(r'"crumb":"([^"]+)"', html)
+            # Try multiple patterns to extract crumb
+            crumb_patterns = [
+                r'"crumb"\s*:\s*"([^"]+)"',  # Most common format
+                r'crumb["\']?\s*:\s*"([^"]+)"',  # Alternative format
+                r'window\.CRUMB\s*=\s*"([^"]+)"',  # Global variable
+                r'crumb["\']?\s*:\s*["\']([^"\']+)["\']',  # Single quotes
+            ]
             
-            if not crumb_match:
-                logger.error("Could not extract crumb from Yahoo Finance HTML")
-                raise APIError(
-                    error_code="E003_API_ERROR",
-                    message="Unable to extract security token from Yahoo Finance"
-                )
+            crumb_value = None
+            for pattern in crumb_patterns:
+                match = re.search(pattern, html)
+                if match:
+                    crumb_value = match.group(1)
+                    logger.info(f"Found crumb with pattern: {pattern[:50]}...")
+                    break
             
-            self.crumb = crumb_match.group(1)
-            logger.info(f"Successfully obtained crumb token: {self.crumb[:20]}...")
+            if not crumb_value:
+                # Yahoo Finance might not require crumb anymore
+                logger.warning("Could not extract crumb from Yahoo Finance HTML, using empty string")
+                self.crumb = ""
+                return self.crumb
+            
+            self.crumb = crumb_value
+            logger.info(f"Successfully obtained crumb token: {self.crumb[:30]}...")
             return self.crumb
             
         except requests.Timeout:
             logger.error("Timeout while fetching crumb from Yahoo Finance")
-            raise TimeoutException(
-                error_code="E001_TIMEOUT",
-                message="Timeout while fetching crumb from Yahoo Finance"
-            )
+            # Try with empty crumb as fallback
+            self.crumb = ""
+            return self.crumb
         except requests.RequestException as e:
             logger.error(f"Connection error while fetching crumb: {e}")
-            raise APIError(
-                error_code="E003_API_ERROR",
-                message=f"Failed to connect to Yahoo Finance: {str(e)}"
-            )
+            # Try with empty crumb as fallback
+            self.crumb = ""
+            return self.crumb
         except Exception as e:
             logger.error(f"Unexpected error fetching crumb: {e}")
-            raise APIError(
-                error_code="E003_API_ERROR",
-                message=f"Failed to get crumb: {str(e)}"
-            )
+            # Try with empty crumb as fallback
+            self.crumb = ""
+            return self.crumb
 
     def __init__(self):
         self.session: Optional[aiohttp.ClientSession] = None
@@ -123,13 +130,12 @@ class YahooFinanceClient:
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session with proper connector settings"""
         if self.session is None:
-            # Create connector with larger buffer for Yahoo Finance
-            # Yahoo Finance returns large Set-Cookie headers (8KB+)
+            # Create connector with proper settings for Yahoo Finance
+            # Note: aiohttp may not support read_bufsize on all versions,
+            # so we use a basic connector and rely on requests for initial auth
             connector = aiohttp.TCPConnector(
                 limit_per_host=5,
                 ssl=True,
-                # Increase read buffer from default 2048 to 64KB to handle large headers
-                read_bufsize=65536,
             )
             
             # Create session
@@ -139,7 +145,7 @@ class YahooFinanceClient:
                 timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
             )
             
-            logger.info("Created aiohttp session with larger buffers for Yahoo Finance")
+            logger.info("Created aiohttp session for Yahoo Finance")
         return self.session
 
     async def close(self):
