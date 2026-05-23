@@ -59,25 +59,27 @@ class MarketDataService:
         Returns:
             Dict with success status and index data or error
         """
-        import asyncio
         import aiohttp
         from datetime import datetime
         
         cache_key = CacheKeyBuilder.indices()
         
         # Step 1: Check cache
-        cached_data = await self.cache_manager.get(cache_key)
-        if cached_data:
-            logger.info("✅ Cache hit for indices")
-            return {
-                "success": True,
-                "data": [Index(**idx) for idx in cached_data["indices"]],
-                "source": "cache",
-            }
+        try:
+            cached_data = await self.cache_manager.get(cache_key)
+            if cached_data:
+                logger.info("✅ Cache hit for indices")
+                return {
+                    "success": True,
+                    "data": [Index(**idx) for idx in cached_data["indices"]],
+                    "source": "cache",
+                }
+        except Exception as e:
+            logger.warning(f"Cache check failed: {e}")
 
         # Step 2: Direct CSV download from Yahoo Finance (no crumb!)
         try:
-            logger.info("📊 Trying Yahoo Finance CSV download (direct, no crumb)...")
+            logger.info("📊 Trying Yahoo Finance CSV download...")
             
             indices_dict = {}
             
@@ -88,13 +90,11 @@ class MarketDataService:
                 "^SOX": "費城半導體指數",
             }
             
-            session = aiohttp.ClientSession()
-            
-            try:
+            # Use async context manager for session
+            async with aiohttp.ClientSession() as session:
                 for symbol, zh_name in index_info.items():
                     try:
                         # Use Yahoo Finance download CSV endpoint
-                        # Format: https://query1.finance.yahoo.com/v7/finance/download/SYMBOL
                         url = f"https://query1.finance.yahoo.com/v7/finance/download/{symbol}"
                         
                         params = {
@@ -154,25 +154,23 @@ class MarketDataService:
                                 indices_dict[symbol] = index
                                 logger.info(f"✅ Fetched {symbol}: {close_price}")
                                 
-                            except (ValueError, IndexError) as e:
+                            except (ValueError, IndexError, decimal.InvalidOperation) as e:
                                 logger.warning(f"Failed to parse {symbol} data: {e}")
                                 continue
                                 
-                    except asyncio.TimeoutError:
-                        logger.warning(f"Timeout fetching {symbol}")
-                        continue
                     except Exception as e:
                         logger.warning(f"Failed to fetch {symbol}: {str(e)[:100]}")
                         continue
+            
+            if indices_dict:
+                result = {
+                    "success": True,
+                    "data": list(indices_dict.values()),
+                    "source": "yahoo_finance_csv",
+                }
                 
-                if indices_dict:
-                    result = {
-                        "success": True,
-                        "data": list(indices_dict.values()),
-                        "source": "yahoo_finance_csv",
-                    }
-                    
-                    # Cache successful result
+                # Cache successful result
+                try:
                     cache_data = {
                         "indices": [idx.dict() for idx in indices_dict.values()]
                     }
@@ -182,20 +180,21 @@ class MarketDataService:
                         "index",
                         CachePolicies.INDEX_TTL_MINUTES,
                     )
-                    
-                    logger.info(f"✅ Successfully fetched {len(indices_dict)} indices from Yahoo Finance CSV")
-                    return result
-                else:
-                    logger.warning("No indices data fetched from Yahoo Finance CSV")
-                    
-            finally:
-                await session.close()
+                except Exception as e:
+                    logger.warning(f"Failed to cache indices: {e}")
+                
+                logger.info(f"✅ Successfully fetched {len(indices_dict)} indices from Yahoo Finance CSV")
+                return result
+            else:
+                logger.warning("No indices data fetched from Yahoo Finance CSV")
                 
         except Exception as e:
             logger.error(f"❌ Yahoo Finance CSV download failed: {str(e)[:100]}")
+            import traceback
+            logger.error(traceback.format_exc())
 
         # Step 3: CSV download failed, try to return stale cache
-        logger.warning("❌ Yahoo Finance CSV download failed, checking stale cache...")
+        logger.warning("❌ Trying stale cache...")
         
         try:
             all_cache = await self.cache_manager.get(cache_key, ignore_ttl=True)
