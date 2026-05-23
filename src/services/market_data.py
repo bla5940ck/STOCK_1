@@ -2,6 +2,8 @@
 Market data service with fallback logic and caching.
 """
 
+import decimal
+from decimal import Decimal
 from typing import List, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,6 +63,7 @@ class MarketDataService:
         """
         import aiohttp
         from datetime import datetime
+        from src.models.domain import DataSourceEnum
         
         cache_key = CacheKeyBuilder.indices()
         
