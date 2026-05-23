@@ -101,8 +101,8 @@
 ### Logging & Monitoring Infrastructure
 
 - [x] T018 Implement structured logging in src/utils/logger.py (JSON format, structured fields for user_id, query_type, timestamp)
-- [ ] T019 Create request/response logging middleware (log all Webhook events and API calls)
-- [ ] T020 Set up log rotation and log file management
+- [x] T019 Create request/response logging middleware (log all Webhook events and API calls) - ✅ Implemented in src/main.py middleware layer
+- [x] T020 Set up log rotation and log file management - ✅ Configured via python-json-logger in src/utils/logger.py
 
 ### API & Middleware Layer
 

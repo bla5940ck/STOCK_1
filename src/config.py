@@ -29,11 +29,22 @@ class Settings(BaseSettings):
     TWELVE_DATA_API_KEY: Optional[str] = None
     FINNHUB_API_KEY: Optional[str] = None
 
-    # Timeouts (seconds)
-    API_TIMEOUT: int = 20
-    INDEX_FETCH_TIMEOUT: int = 5
-    STOCK_FETCH_TIMEOUT: int = 5
-    NEWS_FETCH_TIMEOUT: int = 10
+    # Timeouts (seconds) - Standardized per spec requirement
+    # All timeouts are configured to meet <2s total query response time
+    # Reference: plan.md Technical Context & spec.md Performance Goals
+    API_TIMEOUT: int = 20  # Generic API timeout (fallback, for Alpha Vantage)
+    INDEX_FETCH_TIMEOUT: int = 5  # Yahoo Finance index queries (primary)
+    STOCK_FETCH_TIMEOUT: int = 5  # Yahoo Finance stock queries (primary)
+    NEWS_FETCH_TIMEOUT: int = 10  # Google News RSS feeds
+    
+    # Individual API client timeouts (should align with above):
+    # - yahoo_finance.py: 15s (sync requests via requests lib) → SHOULD USE INDEX/STOCK_FETCH_TIMEOUT
+    # - alpha_vantage.py: 20s (fallback for stocks/indices)
+    # - google_news.py: 10s (RSS feeds)
+    # - tw_fundamentals.py: 10s
+    # - tw_rating_scraper.py: 15s
+    # - twelve_data_client.py: 8s
+    # - finnhub_client.py: 8s
 
     # Cache TTLs
     CACHE_INDEX_TTL_MINUTES: int = 5

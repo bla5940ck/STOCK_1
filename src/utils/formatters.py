@@ -409,6 +409,13 @@ def format_stock_message(
     # Header
     company_name = stock.zh_name or stock.company_name
     lines.append(f"📈 {stock.code} - {company_name}")
+    
+    # Data timestamp (as per spec requirement FR-009)
+    if hasattr(stock, 'last_updated') and stock.last_updated:
+        data_time = stock.last_updated.strftime("%Y-%m-%d %H:%M") if isinstance(stock.last_updated, datetime) else str(stock.last_updated)
+        lines.append(f"📅 數據時間: {data_time} UTC")
+    else:
+        lines.append(f"📅 數據時間: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC")
     lines.append("")
 
     # Price info with color indicator (red for up, green for down)
@@ -584,6 +591,7 @@ def format_tw_stock_message(us_code: str, tw_stocks: List[TaiwanStock]) -> str:
         
     Example:
         🇹🇼 與 TSLA 相關的台股標的
+        📅 數據時間: 2026-05-23 14:30 UTC
         
         • 台積電 (2330) - 供應商
           TSLA 晶片製造商，相關度: 85%
@@ -591,7 +599,10 @@ def format_tw_stock_message(us_code: str, tw_stocks: List[TaiwanStock]) -> str:
         • 聯電 (2303) - 產業競爭者
           ...
     """
-    lines = [f"🇹🇼 與 {us_code} 相關的台股標的", ""]
+    lines = [f"🇹🇼 與 {us_code} 相關的台股標的"]
+    # Add data timestamp (as per spec requirement FR-009)
+    lines.append(f"📅 數據時間: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC")
+    lines.append("")
 
     if not tw_stocks:
         lines.append("目前暫無相關台股資訊")
