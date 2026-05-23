@@ -47,16 +47,14 @@ class MarketDataService:
 
     async def get_indices(self) -> dict:
         """
-        Get major US market indices with improved fallback logic (Render-optimized).
+        Get major US market indices with fallback logic.
         
-        NEW Priority (Render stability optimization):
+        Priority:
         1. Check cache (5 min TTL)
-        2. Try Twelve Data (8s timeout - no crumb needed, more stable)
-        3. Try Finnhub (8s timeout - backup, very reliable)
-        4. Try Alpha Vantage (20s timeout - slower but reliable)
-        5. Try Yahoo Finance (15s timeout - has crumb dependency, last resort)
-        6. Return stale cache if available
-        7. Return error
+        2. Try Alpha Vantage (has fetch_indices method)
+        3. Try Yahoo Finance (has fetch_indices method)
+        4. Return stale cache if available
+        5. Return error
         
         Returns:
             Dict with:
@@ -68,7 +66,7 @@ class MarketDataService:
         """
         cache_key = CacheKeyBuilder.indices()
         
-        # Step 1: Check cache (5 min TTL)
+        # Step 1: Check cache
         cached_data = await self.cache_manager.get(cache_key)
         if cached_data:
             logger.info("✅ Cache hit for indices")
@@ -78,71 +76,9 @@ class MarketDataService:
                 "source": "cache",
             }
 
-        # Step 2: Try Twelve Data first (most stable on Render)
+        # Step 2: Try Alpha Vantage first (most reliable for indices)
         try:
-            logger.info("📊 Trying Twelve Data (primary)...")
-            indices = await self.twelve_data_client.fetch_indices(MAJOR_INDICES)
-            
-            if indices:
-                result = {
-                    "success": True,
-                    "data": list(indices.values()),
-                    "source": "twelve_data",
-                }
-                
-                # Cache successful result
-                cache_data = {
-                    "indices": [idx.dict() for idx in indices.values()]
-                }
-                await self.cache_manager.set(
-                    cache_key,
-                    cache_data,
-                    "index",
-                    CachePolicies.INDEX_TTL_MINUTES,
-                )
-                
-                logger.info(f"✅ Successfully fetched {len(indices)} indices from Twelve Data")
-                return result
-                
-        except TimeoutException as e:
-            logger.warning(f"⏱️  Twelve Data timeout: {str(e)[:100]}")
-        except Exception as e:
-            logger.warning(f"⚠️  Twelve Data failed: {str(e)[:100]}")
-
-        # Step 3: Try Finnhub as secondary (very reliable)
-        try:
-            logger.info("📊 Trying Finnhub (secondary)...")
-            indices = await self.finnhub_client.fetch_indices(MAJOR_INDICES)
-            
-            if indices:
-                result = {
-                    "success": True,
-                    "data": list(indices.values()),
-                    "source": "finnhub",
-                }
-                
-                # Cache successful result
-                cache_data = {
-                    "indices": [idx.dict() for idx in indices.values()]
-                }
-                await self.cache_manager.set(
-                    cache_key,
-                    cache_data,
-                    "index",
-                    CachePolicies.INDEX_TTL_MINUTES,
-                )
-                
-                logger.info(f"✅ Successfully fetched {len(indices)} indices from Finnhub")
-                return result
-                
-        except TimeoutException as e:
-            logger.warning(f"⏱️  Finnhub timeout: {str(e)[:100]}")
-        except Exception as e:
-            logger.warning(f"⚠️  Finnhub failed: {str(e)[:100]}")
-
-        # Step 4: Try Alpha Vantage (stable but slower)
-        try:
-            logger.info("📊 Trying Alpha Vantage (tertiary)...")
+            logger.info("📊 Trying Alpha Vantage (primary)...")
             indices = await self.alpha_vantage_client.fetch_indices(MAJOR_INDICES)
             
             if indices:
@@ -167,13 +103,13 @@ class MarketDataService:
                 return result
                 
         except TimeoutException as e:
-            logger.error(f"⏱️  Alpha Vantage timeout: {str(e)[:100]}")
+            logger.warning(f"⏱️  Alpha Vantage timeout: {str(e)[:100]}")
         except Exception as e:
-            logger.error(f"❌ Alpha Vantage failed: {str(e)[:100]}")
+            logger.warning(f"⚠️  Alpha Vantage failed: {str(e)[:100]}")
 
-        # Step 5: Try Yahoo Finance as last resort (crumb dependency)
+        # Step 3: Try Yahoo Finance as fallback
         try:
-            logger.info("📊 Trying Yahoo Finance (last resort)...")
+            logger.info("📊 Trying Yahoo Finance (fallback)...")
             indices = await self.yahoo_client.fetch_indices(MAJOR_INDICES)
             
             if indices:
@@ -202,14 +138,13 @@ class MarketDataService:
         except Exception as e:
             logger.error(f"❌ Yahoo Finance failed: {str(e)[:100]}")
 
-        # Step 6: All APIs failed, try to return stale cache
-        logger.warning("❌ All APIs failed, checking stale cache...")
+        # Step 4: Both APIs failed, try to return stale cache
+        logger.warning("❌ Both Alpha Vantage and Yahoo Finance failed")
         
         try:
-            # Try to get expired cache as fallback (without TTL filter)
             all_cache = await self.cache_manager.get(cache_key, ignore_ttl=True)
             if all_cache:
-                logger.warning("⚠️  Returning STALE cached data (please refresh later)")
+                logger.warning("⚠️  Returning STALE cached data")
                 return {
                     "success": True,
                     "data": [Index(**idx) for idx in all_cache["indices"]],
@@ -219,12 +154,12 @@ class MarketDataService:
         except Exception as e:
             logger.error(f"Failed to retrieve stale cache: {str(e)[:100]}")
 
-        # Step 7: All options exhausted - return error
+        # Step 5: All options exhausted - return error
         logger.error("🚨 Unable to fetch indices from any source")
         return {
             "success": False,
             "error_code": "E003_API_ERROR",
-            "error_message": "❌ 無法取得美股指數數據，所有數據源均無回應。請檢查網路連接或稍後重試。",
+            "error_message": "無法從 Alpha Vantage 與 Yahoo Finance 取得指數數據，請稍後重試。",
         }
 
     async def get_index(self, symbol: str) -> dict:
