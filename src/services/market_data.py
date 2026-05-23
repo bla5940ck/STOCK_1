@@ -47,14 +47,13 @@ class MarketDataService:
 
     async def get_indices(self) -> dict:
         """
-        Get major US market indices with fallback logic.
+        Get major US market indices using yfinance (direct, no crumb needed).
         
         Priority:
         1. Check cache (5 min TTL)
-        2. Try Alpha Vantage (has fetch_indices method)
-        3. Try Yahoo Finance (has fetch_indices method)
-        4. Return stale cache if available
-        5. Return error
+        2. Try yfinance directly (most reliable, no API key needed)
+        3. Return stale cache if available
+        4. Return error
         
         Returns:
             Dict with:
@@ -64,6 +63,9 @@ class MarketDataService:
             - 'error_message': str (on failure)
             - 'source': str (which API was used)
         """
+        import yfinance as yf
+        from datetime import datetime
+        
         cache_key = CacheKeyBuilder.indices()
         
         # Step 1: Check cache
@@ -76,21 +78,68 @@ class MarketDataService:
                 "source": "cache",
             }
 
-        # Step 2: Try Alpha Vantage first (most reliable for indices)
+        # Step 2: Try yfinance directly (no crumb, no API key needed)
         try:
-            logger.info("📊 Trying Alpha Vantage (primary)...")
-            indices = await self.alpha_vantage_client.fetch_indices(MAJOR_INDICES)
+            logger.info("📊 Trying yfinance (direct)...")
             
-            if indices:
+            indices_dict = {}
+            
+            # Map of index symbols to Chinese names
+            index_names = {
+                "^GSPC": "S&P 500",
+                "^IXIC": "納斯達克綜合指數",
+                "^SOX": "費城半導體指數",
+            }
+            
+            for symbol, zh_name in index_names.items():
+                try:
+                    # Fetch single index data
+                    ticker = yf.Ticker(symbol)
+                    hist = ticker.history(period="1d")
+                    
+                    if hist.empty:
+                        logger.warning(f"No data for {symbol}")
+                        continue
+                    
+                    # Get the latest data
+                    latest = hist.iloc[-1]
+                    current_price = Decimal(str(latest['Close']))
+                    previous_close = Decimal(str(latest['Open']))
+                    
+                    change_amount = current_price - previous_close
+                    change_percent = (change_amount / previous_close * 100) if previous_close > 0 else Decimal("0")
+                    
+                    index = Index(
+                        id=symbol,
+                        code=symbol,
+                        zh_name=zh_name,
+                        current_price=current_price.quantize(Decimal("0.01")),
+                        previous_close=previous_close.quantize(Decimal("0.01")),
+                        change_amount=change_amount.quantize(Decimal("0.01")),
+                        change_percent=change_percent.quantize(Decimal("0.01")),
+                        high_52w=Decimal("0"),
+                        low_52w=Decimal("0"),
+                        last_updated=datetime.utcnow(),
+                        data_source=DataSourceEnum.YAHOO_FINANCE,
+                    )
+                    
+                    indices_dict[symbol] = index
+                    logger.info(f"✅ Fetched {symbol}: {current_price}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {symbol}: {str(e)[:100]}")
+                    continue
+            
+            if indices_dict:
                 result = {
                     "success": True,
-                    "data": list(indices.values()),
-                    "source": "alpha_vantage",
+                    "data": list(indices_dict.values()),
+                    "source": "yfinance",
                 }
                 
                 # Cache successful result
                 cache_data = {
-                    "indices": [idx.dict() for idx in indices.values()]
+                    "indices": [idx.dict() for idx in indices_dict.values()]
                 }
                 await self.cache_manager.set(
                     cache_key,
@@ -99,47 +148,18 @@ class MarketDataService:
                     CachePolicies.INDEX_TTL_MINUTES,
                 )
                 
-                logger.info(f"✅ Successfully fetched {len(indices)} indices from Alpha Vantage")
+                logger.info(f"✅ Successfully fetched {len(indices_dict)} indices from yfinance")
                 return result
+            else:
+                logger.warning("No indices data fetched from yfinance")
                 
         except TimeoutException as e:
-            logger.warning(f"⏱️  Alpha Vantage timeout: {str(e)[:100]}")
+            logger.error(f"⏱️  yfinance timeout: {str(e)[:100]}")
         except Exception as e:
-            logger.warning(f"⚠️  Alpha Vantage failed: {str(e)[:100]}")
+            logger.error(f"❌ yfinance failed: {str(e)[:100]}")
 
-        # Step 3: Try Yahoo Finance as fallback
-        try:
-            logger.info("📊 Trying Yahoo Finance (fallback)...")
-            indices = await self.yahoo_client.fetch_indices(MAJOR_INDICES)
-            
-            if indices:
-                result = {
-                    "success": True,
-                    "data": list(indices.values()),
-                    "source": "yahoo_finance",
-                }
-                
-                # Cache successful result
-                cache_data = {
-                    "indices": [idx.dict() for idx in indices.values()]
-                }
-                await self.cache_manager.set(
-                    cache_key,
-                    cache_data,
-                    "index",
-                    CachePolicies.INDEX_TTL_MINUTES,
-                )
-                
-                logger.info(f"✅ Successfully fetched {len(indices)} indices from Yahoo Finance")
-                return result
-                
-        except TimeoutException as e:
-            logger.error(f"⏱️  Yahoo Finance timeout: {str(e)[:100]}")
-        except Exception as e:
-            logger.error(f"❌ Yahoo Finance failed: {str(e)[:100]}")
-
-        # Step 4: Both APIs failed, try to return stale cache
-        logger.warning("❌ Both Alpha Vantage and Yahoo Finance failed")
+        # Step 3: yfinance failed, try to return stale cache
+        logger.warning("❌ yfinance failed, checking stale cache...")
         
         try:
             all_cache = await self.cache_manager.get(cache_key, ignore_ttl=True)
@@ -154,12 +174,12 @@ class MarketDataService:
         except Exception as e:
             logger.error(f"Failed to retrieve stale cache: {str(e)[:100]}")
 
-        # Step 5: All options exhausted - return error
+        # Step 4: All options exhausted - return error
         logger.error("🚨 Unable to fetch indices from any source")
         return {
             "success": False,
             "error_code": "E003_API_ERROR",
-            "error_message": "無法從 Alpha Vantage 與 Yahoo Finance 取得指數數據，請稍後重試。",
+            "error_message": "無法取得美股指數數據，請稍後重試。",
         }
 
     async def get_index(self, symbol: str) -> dict:
