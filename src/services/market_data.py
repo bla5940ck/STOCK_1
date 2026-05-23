@@ -59,7 +59,9 @@ class MarketDataService:
         Returns:
             Dict with success status and index data or error
         """
+        import asyncio
         import aiohttp
+        from datetime import datetime
         
         cache_key = CacheKeyBuilder.indices()
         
