@@ -14,6 +14,7 @@ from src.integrations.twelve_data_client import TwelveDataClient
 from src.integrations.finnhub_client import FinnhubClient
 from src.integrations.yahoo_finance import YahooFinanceClient
 from src.integrations.alpha_vantage import AlphaVantageClient
+from src.integrations.iex_cloud import IEXCloudClient
 from src.utils.cache import CacheManager, CacheKeyBuilder, CachePolicies
 from src.utils.logger import get_logger
 from src.exceptions import APIError, TimeoutError as TimeoutException
@@ -37,10 +38,11 @@ class MarketDataService:
         self.db = db
         self.cache_manager = CacheManager(db)
         self.index_repo = IndexRepository(db)
-        self.twelve_data_client = TwelveDataClient()  # Primary source (free tier)
-        self.finnhub_client = FinnhubClient()  # Fallback (more reliable)
-        self.yahoo_client = YahooFinanceClient()
-        self.alpha_vantage_client = AlphaVantageClient()
+        self.iex_cloud_client = IEXCloudClient()  # Primary source (reliable, free tier)
+        self.twelve_data_client = TwelveDataClient()  # Fallback
+        self.finnhub_client = FinnhubClient()  # Fallback
+        self.yahoo_client = YahooFinanceClient()  # Fallback
+        self.alpha_vantage_client = AlphaVantageClient()  # Fallback
 
     async def close(self):
         """Clean up resources"""
@@ -51,19 +53,18 @@ class MarketDataService:
 
     async def get_indices(self) -> dict:
         """
-        Get major US market indices with database fallback.
+        Get major US market indices with multiple fallbacks.
         
         Strategy:
         1. Check cache (5 min TTL)
-        2. Try yfinance library
-        3. Fall back to last-known data in database
-        4. Return error if nothing available
+        2. Try IEX Cloud (reliable on Render)
+        3. Fall back to yfinance library
+        4. Fall back to last-known data in database
+        5. Return error if nothing available
         
         Returns:
             Dict with success status and index data or error
         """
-        import yfinance as yf
-        
         cache_key = CacheKeyBuilder.indices()
         
         # Step 1: Check cache
@@ -79,9 +80,101 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
 
-        # Step 2: Try yfinance
+        # Step 2: Try IEX Cloud (most reliable on Render)
         try:
-            logger.info("📊 Fetching indices from yfinance...")
+            logger.info("📊 Fetching indices from IEX Cloud...")
+            
+            quotes = await self.iex_cloud_client.fetch_indices(MAJOR_INDICES)
+            
+            if quotes and len(quotes) >= 2:
+                indices_dict = {}
+                
+                symbols_info = {
+                    "^GSPC": "S&P 500",
+                    "^IXIC": "納斯達克綜合指數",
+                    "^SOX": "費城半導體指數",
+                }
+                
+                for symbol, zh_name in symbols_info.items():
+                    if symbol not in quotes:
+                        continue
+                    
+                    try:
+                        quote = quotes[symbol]
+                        
+                        current_price = Decimal(str(quote.get("latestPrice", 0)))
+                        previous_close = Decimal(str(quote.get("previousClose", 0)))
+                        high_52w = Decimal(str(quote.get("week52High", 0)))
+                        low_52w = Decimal(str(quote.get("week52Low", 0)))
+                        
+                        if current_price <= 0 or previous_close <= 0:
+                            logger.warning(f"Invalid price for {symbol}: {current_price}")
+                            continue
+                        
+                        # Calculate change
+                        change_amount = current_price - previous_close
+                        change_percent = (change_amount / previous_close * 100) if previous_close > 0 else Decimal("0")
+                        
+                        # Create Index object
+                        index = Index(
+                            id=symbol,
+                            code=symbol,
+                            zh_name=zh_name,
+                            current_price=current_price.quantize(Decimal("0.01")),
+                            previous_close=previous_close.quantize(Decimal("0.01")),
+                            change_amount=change_amount.quantize(Decimal("0.01")),
+                            change_percent=change_percent.quantize(Decimal("0.01")),
+                            high_52w=high_52w.quantize(Decimal("0.01")),
+                            low_52w=low_52w.quantize(Decimal("0.01")),
+                            last_updated=datetime.utcnow(),
+                            data_source=DataSourceEnum.YAHOO_FINANCE,  # Keep for compatibility
+                        )
+                        
+                        indices_dict[symbol] = index
+                        logger.info(f"✅ Fetched {symbol} from IEX: {current_price}")
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to parse {symbol}: {str(e)[:100]}")
+                        continue
+                
+                if len(indices_dict) >= 2:
+                    indices_list = list(indices_dict.values())
+                    
+                    # Save to database and cache
+                    try:
+                        for idx in indices_list:
+                            await self.index_repo.create_or_update(idx)
+                        await self.db.commit()
+                        logger.info("✅ Saved indices to database")
+                    except Exception as e:
+                        logger.warning(f"Failed to save to database: {e}")
+                    
+                    try:
+                        cache_data = {
+                            "indices": [idx.dict() for idx in indices_list]
+                        }
+                        await self.cache_manager.set(
+                            cache_key,
+                            cache_data,
+                            "index",
+                            CachePolicies.INDEX_TTL_MINUTES,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to cache indices: {e}")
+                    
+                    logger.info(f"✅ Successfully fetched {len(indices_list)} indices from IEX Cloud")
+                    return {
+                        "success": True,
+                        "data": indices_list,
+                        "source": "iex_cloud",
+                    }
+        except Exception as e:
+            logger.warning(f"⚠️  IEX Cloud fetch failed: {str(e)[:100]}")
+
+        # Step 3: Fall back to yfinance
+        try:
+            import yfinance as yf
+            logger.info("📊 Fetching indices from yfinance (fallback)...")
             
             def fetch_with_yfinance():
                 """Synchronous function to fetch using yfinance"""
@@ -186,16 +279,13 @@ class MarketDataService:
                 logger.warning(f"Insufficient indices from yfinance: {len(indices_dict) if indices_dict else 0}")
                 
         except Exception as e:
-            logger.error(f"❌ yfinance fetch failed: {str(e)[:100]}")
+            logger.warning(f"⚠️  yfinance fetch failed: {str(e)[:100]}")
 
-        # Step 3: Fall back to database - get last-known indices
+        # Step 4: Fall back to database - get last-known indices
         logger.warning("⚠️  Getting last-known indices from database...")
         
         try:
-            from src.db.repositories import IndexRepository
-            
-            repo = IndexRepository(self.db)
-            db_indices = await repo.get_major_indices()
+            db_indices = await self.index_repo.get_major_indices()
             
             if db_indices and len(db_indices) >= 2:
                 logger.info(f"✅ Using {len(db_indices)} indices from database")
