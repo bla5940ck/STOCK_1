@@ -51,12 +51,13 @@ class MarketDataService:
 
     async def get_indices(self) -> dict:
         """
-        Get major US market indices using yfinance with proper configuration.
+        Get major US market indices with database fallback.
         
         Strategy:
         1. Check cache (5 min TTL)
-        2. Use yfinance library with ticker objects and history fetch
-        3. Return error if all fail
+        2. Try yfinance library
+        3. Fall back to last-known data in database
+        4. Return error if nothing available
         
         Returns:
             Dict with success status and index data or error
@@ -78,7 +79,7 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
 
-        # Step 2: Fetch from Yahoo Finance using yfinance library
+        # Step 2: Try yfinance
         try:
             logger.info("📊 Fetching indices from yfinance...")
             
@@ -153,7 +154,15 @@ class MarketDataService:
             if indices_dict and len(indices_dict) >= 2:
                 indices_list = list(indices_dict.values())
                 
-                # Cache successful result
+                # Save to database and cache
+                try:
+                    for idx in indices_list:
+                        await self.index_repo.create_or_update(idx)
+                    await self.db.commit()
+                    logger.info("✅ Saved indices to database")
+                except Exception as e:
+                    logger.warning(f"Failed to save to database: {e}")
+                
                 try:
                     cache_data = {
                         "indices": [idx.dict() for idx in indices_list]
@@ -179,63 +188,47 @@ class MarketDataService:
         except Exception as e:
             logger.error(f"❌ yfinance fetch failed: {str(e)[:100]}")
 
-        # Step 3: All options exhausted - return hardcoded fallback
-        # Use this as temporary solution while we debug API issues
-        logger.warning("⚠️  Using fallback cached data...")
+        # Step 3: Fall back to database - get last-known indices
+        logger.warning("⚠️  Getting last-known indices from database...")
         
         try:
-            fallback_indices = [
-                Index(
-                    id="^GSPC",
-                    code="^GSPC",
-                    zh_name="S&P 500",
-                    current_price=Decimal("5400.00"),
-                    previous_close=Decimal("5390.00"),
-                    change_amount=Decimal("10.00"),
-                    change_percent=Decimal("0.19"),
-                    high_52w=Decimal("5900.00"),
-                    low_52w=Decimal("4700.00"),
-                    last_updated=datetime.utcnow(),
-                    data_source=DataSourceEnum.YAHOO_FINANCE,
-                ),
-                Index(
-                    id="^IXIC",
-                    code="^IXIC",
-                    zh_name="納斯達克綜合指數",
-                    current_price=Decimal("17000.00"),
-                    previous_close=Decimal("16950.00"),
-                    change_amount=Decimal("50.00"),
-                    change_percent=Decimal("0.30"),
-                    high_52w=Decimal("19000.00"),
-                    low_52w=Decimal("13000.00"),
-                    last_updated=datetime.utcnow(),
-                    data_source=DataSourceEnum.YAHOO_FINANCE,
-                ),
-                Index(
-                    id="^SOX",
-                    code="^SOX",
-                    zh_name="費城半導體指數",
-                    current_price=Decimal("4200.00"),
-                    previous_close=Decimal("4180.00"),
-                    change_amount=Decimal("20.00"),
-                    change_percent=Decimal("0.48"),
-                    high_52w=Decimal("5400.00"),
-                    low_52w=Decimal("2800.00"),
-                    last_updated=datetime.utcnow(),
-                    data_source=DataSourceEnum.YAHOO_FINANCE,
-                ),
-            ]
+            from src.db.repositories import IndexRepository
             
-            logger.info("✅ Using fallback indices")
-            return {
-                "success": True,
-                "data": fallback_indices,
-                "source": "fallback",
-                "warning": "⚠️ 數據為應急備用值，請稍後重試以獲取實時數據",
-            }
+            repo = IndexRepository(self.db)
+            db_indices = await repo.get_major_indices()
             
+            if db_indices and len(db_indices) >= 2:
+                logger.info(f"✅ Using {len(db_indices)} indices from database")
+                
+                # Convert to domain objects
+                result_indices = []
+                for idx in db_indices:
+                    domain_idx = Index(
+                        id=idx.id,
+                        code=idx.code,
+                        zh_name=idx.zh_name,
+                        current_price=idx.current_price,
+                        previous_close=idx.previous_close,
+                        change_amount=idx.change_amount,
+                        change_percent=idx.change_percent,
+                        high_52w=idx.high_52w,
+                        low_52w=idx.low_52w,
+                        last_updated=idx.last_updated,
+                        data_source=idx.data_source,
+                    )
+                    result_indices.append(domain_idx)
+                
+                return {
+                    "success": True,
+                    "data": result_indices,
+                    "source": "database",
+                    "warning": "⚠️ 數據來自上次成功的查詢，可能不是最新的實時數據",
+                }
+            else:
+                logger.warning("No indices in database")
+                
         except Exception as e:
-            logger.error(f"Failed to create fallback: {str(e)[:100]}")
+            logger.error(f"Failed to get indices from database: {str(e)[:100]}")
 
         # Step 4: Everything failed - return error
         logger.error("🚨 Unable to fetch indices from any source")
