@@ -15,10 +15,12 @@ RUN pip install --upgrade pip setuptools wheel && \
     pip install --default-timeout=1000 -r requirements.txt
 
 COPY src ./src
+COPY auto_seed.py .
 COPY pyproject.toml .
 
 RUN mkdir -p logs
 
 EXPOSE 8000
 
-CMD python -m uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Auto-seed database before starting the app
+CMD python auto_seed.py && python -m uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}
