@@ -279,10 +279,11 @@ class MarketDataService:
                     "success": True,
                     "data": result_indices,
                     "source": "database",
-                    "warning": "⚠️ 數據來自上次成功的查詢，可能不是最新的實時數據",
+                    "warning": "⚠️ 資料來自上次成功的查詢。如需最新數據，請稍後重試。",
                 }
             else:
-                logger.warning("No indices in database")
+                logger.warning(f"❌ No indices in database (found: {len(db_indices) if db_indices else 0})")
+                logger.warning("💡 To seed database: Run 'python seed_market_data.py' on your local machine")
                 
         except Exception as e:
             logger.error(f"Failed to get indices from database: {str(e)[:100]}")
