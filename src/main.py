@@ -16,7 +16,14 @@ from src.db.database import init_db, close_db, get_db
 from src.utils.logger import init_logger, get_logger
 from src.exceptions import ApplicationError, SignatureError
 from src.api.webhooks import verify_webhook_request, WebhookEventHandler
-from src.api import admin
+
+# Lazy import admin to avoid import errors
+try:
+    from src.api import admin
+    admin_router = admin.router
+except Exception as e:
+    print(f"Warning: Failed to import admin module: {e}")
+    admin_router = None
 
 # Initialize logger
 logger = init_logger()
@@ -147,8 +154,9 @@ def create_app() -> FastAPI:
                 "timestamp": datetime.utcnow().isoformat() + "Z",
             }
 
-    # Include admin routes
-    app.include_router(admin.router)
+    # Include admin routes if available
+    if admin_router:
+        app.include_router(admin_router)
 
     # Webhook endpoint with signature verification
     @app.post("/webhook/line")
