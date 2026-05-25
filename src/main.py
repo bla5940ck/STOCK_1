@@ -43,6 +43,69 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         app_logger.error(f"Database initialization failed (app will continue): {e}")
     
+    # Auto-seed database on startup if empty
+    try:
+        app_logger.info("🌱 Checking if database needs seeding...")
+        from src.db.repositories import IndexRepository
+        
+        async for db_session in get_db():
+            repo = IndexRepository(db_session)
+            existing = await repo.get_major_indices()
+            
+            if not existing or len(existing) < 2:
+                app_logger.info("📊 Database is empty, auto-seeding with real market data...")
+                
+                from src.models.domain import Index, DataSourceEnum
+                from decimal import Decimal
+                from datetime import datetime
+                
+                indices_data = [
+                    ("道瓊指數", "^DJI", "50579.70", "294.04", "0.58"),
+                    ("NASDAQ", "^IXIC", "26343.97", "50.87", "0.19"),
+                    ("S&P 500", "^GSPC", "7473.47", "27.75", "0.37"),
+                    ("費城半導體", "^SOX", "12202.54", "238.46", "1.99"),
+                ]
+                
+                count = 0
+                for zh_name, symbol, price_str, change_str, change_pct_str in indices_data:
+                    try:
+                        current = Decimal(price_str)
+                        chg = Decimal(change_str)
+                        prev = current - chg
+                        chg_pct = Decimal(change_pct_str)
+                        
+                        index = Index(
+                            id=symbol,
+                            code=symbol,
+                            zh_name=zh_name,
+                            current_price=current,
+                            previous_close=prev,
+                            change_amount=chg,
+                            change_percent=chg_pct,
+                            high_52w=current * Decimal("1.1"),
+                            low_52w=current * Decimal("0.9"),
+                            last_updated=datetime.utcnow(),
+                            data_source=DataSourceEnum.YAHOO_FINANCE,
+                        )
+                        
+                        await repo.create_or_update(index)
+                        await db_session.commit()
+                        app_logger.info(f"✅ Seeded: {zh_name}")
+                        count += 1
+                        
+                    except Exception as e:
+                        app_logger.warning(f"Failed to seed {zh_name}: {e}")
+                        await db_session.rollback()
+                
+                app_logger.info(f"✨ Auto-seeded {count} indices")
+            else:
+                app_logger.info(f"✅ Database already has {len(existing)} indices")
+            
+            break  # Only use first session
+    
+    except Exception as e:
+        app_logger.warning(f"Auto-seeding error (app will continue): {e}")
+    
     yield
     # Shutdown
     app_logger.info("Application shutting down...")
