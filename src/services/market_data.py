@@ -49,18 +49,18 @@ class MarketDataService:
 
     async def get_indices(self) -> dict:
         """
-        Get major US market indices with multiple fallback strategies.
+        Get major US market indices using yfinance library (most reliable).
         
         Priority:
         1. Check cache (5 min TTL)
-        2. Yahoo Finance CSV download (direct, no crumb needed)
+        2. yfinance library (reliable, handles all Yahoo Finance quirks)
         3. Return stale cache if available
         4. Return error
         
         Returns:
             Dict with success status and index data or error
         """
-        import aiohttp
+        import yfinance as yf
         from datetime import datetime
         from src.models.domain import DataSourceEnum
         
@@ -79,9 +79,9 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
 
-        # Step 2: Direct CSV download from Yahoo Finance
+        # Step 2: Use yfinance (most reliable)
         try:
-            logger.info("📊 Trying Yahoo Finance CSV download...")
+            logger.info("📊 Trying yfinance for indices...")
             
             indices_dict = {}
             
@@ -91,88 +91,58 @@ class MarketDataService:
                 "^SOX": "費城半導體指數",
             }
             
-            async with aiohttp.ClientSession() as session:
-                for symbol, zh_name in index_info.items():
-                    try:
-                        # Use Yahoo Finance download CSV endpoint with better headers
-                        url = f"https://query1.finance.yahoo.com/v7/finance/download/{symbol}"
-                        
-                        params = {
-                            "period1": "1",
-                            "period2": "9999999999",
-                            "interval": "1d",
-                            "events": "history",
-                        }
-                        
-                        headers = {
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                            "Accept-Language": "en-US,en;q=0.5",
-                        }
-                        
-                        async with session.get(
-                            url,
-                            params=params,
-                            timeout=aiohttp.ClientTimeout(total=10),
-                            headers=headers,
-                        ) as response:
-                            if response.status != 200:
-                                logger.warning(f"Failed to fetch {symbol}: HTTP {response.status}")
-                                continue
-                            
-                            text = await response.text()
-                            lines = text.strip().split('\n')
-                            
-                            if len(lines) < 2:
-                                logger.warning(f"No data in response for {symbol}")
-                                continue
-                            
-                            # Parse last row (most recent data)
-                            # Format: Date,Open,High,Low,Close,Adj Close,Volume
-                            latest_line = lines[-1]
-                            parts = latest_line.split(',')
-                            
-                            if len(parts) < 5:
-                                logger.warning(f"Invalid data format for {symbol}: {latest_line}")
-                                continue
-                            
-                            try:
-                                open_price = Decimal(parts[1])
-                                close_price = Decimal(parts[4])
-                                
-                                change_amount = close_price - open_price
-                                change_percent = (change_amount / open_price * 100) if open_price > 0 else Decimal("0")
-                                
-                                index = Index(
-                                    id=symbol,
-                                    code=symbol,
-                                    zh_name=zh_name,
-                                    current_price=close_price.quantize(Decimal("0.01")),
-                                    previous_close=open_price.quantize(Decimal("0.01")),
-                                    change_amount=change_amount.quantize(Decimal("0.01")),
-                                    change_percent=change_percent.quantize(Decimal("0.01")),
-                                    high_52w=Decimal("0"),
-                                    low_52w=Decimal("0"),
-                                    last_updated=datetime.utcnow(),
-                                    data_source=DataSourceEnum.YAHOO_FINANCE,
-                                )
-                                
-                                indices_dict[symbol] = index
-                                logger.info(f"✅ Fetched {symbol}: {close_price}")
-                                
-                            except (ValueError, IndexError, decimal.InvalidOperation) as e:
-                                logger.warning(f"Failed to parse {symbol} data: {e}")
-                                continue
-                                
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch {symbol}: {str(e)[:100]}")
+            for symbol, zh_name in index_info.items():
+                try:
+                    # Download 1 day of historical data (most recent)
+                    logger.info(f"   Fetching {symbol}...")
+                    ticker = yf.Ticker(symbol)
+                    
+                    # Get latest quote (info attribute)
+                    data = ticker.history(period="1d")
+                    
+                    if data is None or len(data) == 0:
+                        logger.warning(f"No data from yfinance for {symbol}")
                         continue
+                    
+                    # Get the latest row
+                    latest = data.iloc[-1]
+                    
+                    # Extract prices
+                    open_price = Decimal(str(latest['Open']))
+                    close_price = Decimal(str(latest['Close']))
+                    
+                    # Calculate change
+                    change_amount = close_price - open_price
+                    change_percent = (change_amount / open_price * 100) if open_price > 0 else Decimal("0")
+                    
+                    # Create Index object
+                    index = Index(
+                        id=symbol,
+                        code=symbol,
+                        zh_name=zh_name,
+                        current_price=close_price.quantize(Decimal("0.01")),
+                        previous_close=open_price.quantize(Decimal("0.01")),
+                        change_amount=change_amount.quantize(Decimal("0.01")),
+                        change_percent=change_percent.quantize(Decimal("0.01")),
+                        high_52w=Decimal("0"),
+                        low_52w=Decimal("0"),
+                        last_updated=datetime.utcnow(),
+                        data_source=DataSourceEnum.YAHOO_FINANCE,
+                    )
+                    
+                    indices_dict[symbol] = index
+                    logger.info(f"✅ Fetched {symbol}: {close_price}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {symbol} from yfinance: {str(e)[:100]}")
+                    continue
             
-            if len(indices_dict) >= 2:  # At least 2 indices
+            # Check if we have at least 2 indices
+            if len(indices_dict) >= 2:
                 result = {
                     "success": True,
                     "data": list(indices_dict.values()),
-                    "source": "yahoo_finance_csv",
+                    "source": "yfinance",
                 }
                 
                 # Cache successful result
@@ -189,15 +159,15 @@ class MarketDataService:
                 except Exception as e:
                     logger.warning(f"Failed to cache indices: {e}")
                 
-                logger.info(f"✅ Successfully fetched {len(indices_dict)} indices from Yahoo Finance CSV")
+                logger.info(f"✅ Successfully fetched {len(indices_dict)} indices from yfinance")
                 return result
             else:
-                logger.warning(f"Insufficient indices fetched: {len(indices_dict)}")
+                logger.warning(f"Insufficient indices from yfinance: {len(indices_dict)}")
                 
         except Exception as e:
-            logger.error(f"❌ Yahoo Finance CSV download failed: {str(e)[:100]}")
+            logger.error(f"❌ yfinance failed: {str(e)[:100]}")
 
-        # Step 3: CSV download failed, try to return stale cache
+        # Step 3: yfinance failed, try to return stale cache
         logger.warning("❌ Trying stale cache...")
         
         try:
