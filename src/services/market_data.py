@@ -71,11 +71,10 @@ class MarketDataService:
         
         Strategy:
         1. Check cache (5 min TTL)
-        2. Try IEX Cloud (if token set)
-        3. Try Finnhub (now with real API key)
-        4. Fall back to yfinance library
-        5. Fall back to last-known data in database
-        6. Return error if nothing available
+        2. Try Alpha Vantage (reliable, has API key configured)
+        3. Try yfinance library
+        4. Fall back to last-known data in database
+        5. Return error if nothing available
         
         Returns:
             Dict with success status and index data or error
@@ -95,102 +94,47 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
 
-        # Step 2: Try IEX Cloud (most reliable on Render)
+        # Step 2: Try Alpha Vantage (primary - has API key configured)
         try:
-            logger.info("📊 Fetching indices from IEX Cloud...")
+            logger.info("📊 Fetching indices from Alpha Vantage...")
             
-            quotes = await self.iex_cloud_client.fetch_indices(MAJOR_INDICES)
+            indices_dict = await self.alpha_vantage_client.fetch_indices(MAJOR_INDICES)
             
-            if quotes and len(quotes) >= 2:
-                indices_dict = {}
+            if indices_dict and len(indices_dict) >= 2:
+                indices_list = list(indices_dict.values())
                 
-                symbols_info = {
-                    "^GSPC": "S&P 500",
-                    "^IXIC": "納斯達克綜合指數",
-                    "^SOX": "費城半導體指數",
-                }
+                # Save to database and cache
+                try:
+                    for idx in indices_list:
+                        await self.index_repo.create_or_update(idx)
+                    await self.db.commit()
+                    logger.info("✅ Saved indices to database")
+                except Exception as e:
+                    logger.warning(f"Failed to save to database: {e}")
                 
-                for symbol, zh_name in symbols_info.items():
-                    if symbol not in quotes:
-                        continue
-                    
-                    try:
-                        quote = quotes[symbol]
-                        
-                        current_price = Decimal(str(quote.get("latestPrice", 0)))
-                        previous_close = Decimal(str(quote.get("previousClose", 0)))
-                        high_52w = Decimal(str(quote.get("week52High", 0)))
-                        low_52w = Decimal(str(quote.get("week52Low", 0)))
-                        
-                        if current_price <= 0 or previous_close <= 0:
-                            logger.warning(f"Invalid price for {symbol}: {current_price}")
-                            continue
-                        
-                        # Calculate change
-                        change_amount = current_price - previous_close
-                        change_percent = (change_amount / previous_close * 100) if previous_close > 0 else Decimal("0")
-                        
-                        # Create Index object
-                        index = Index(
-                            id=symbol,
-                            code=symbol,
-                            zh_name=zh_name,
-                            current_price=current_price.quantize(Decimal("0.01")),
-                            previous_close=previous_close.quantize(Decimal("0.01")),
-                            change_amount=change_amount.quantize(Decimal("0.01")),
-                            change_percent=change_percent.quantize(Decimal("0.01")),
-                            high_52w=high_52w.quantize(Decimal("0.01")),
-                            low_52w=low_52w.quantize(Decimal("0.01")),
-                            last_updated=datetime.utcnow(),
-                            data_source=DataSourceEnum.YAHOO_FINANCE,  # Keep for compatibility
-                        )
-                        
-                        indices_dict[symbol] = index
-                        logger.info(f"✅ Fetched {symbol} from IEX: {current_price}")
-                        
-                    except Exception as e:
-                        logger.warning(f"Failed to parse {symbol}: {str(e)[:100]}")
-                        continue
-                
-                if len(indices_dict) >= 2:
-                    indices_list = list(indices_dict.values())
-                    
-                    # Save to database and cache
-                    try:
-                        for idx in indices_list:
-                            await self.index_repo.create_or_update(idx)
-                        await self.db.commit()
-                        logger.info("✅ Saved indices to database")
-                    except Exception as e:
-                        logger.warning(f"Failed to save to database: {e}")
-                    
-                    try:
-                        cache_data = {
-                            "indices": [idx.dict() for idx in indices_list]
-                        }
-                        await self.cache_manager.set(
-                            cache_key,
-                            cache_data,
-                            "index",
-                            CachePolicies.INDEX_TTL_MINUTES,
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to cache indices: {e}")
-                    
-                    logger.info(f"✅ Successfully fetched {len(indices_list)} indices from IEX Cloud")
-                    return {
-                        "success": True,
-                        "data": indices_list,
-                        "source": "iex_cloud",
+                try:
+                    cache_data = {
+                        "indices": [idx.dict() for idx in indices_list]
                     }
+                    await self.cache_manager.set(
+                        cache_key,
+                        cache_data,
+                        "index",
+                        CachePolicies.INDEX_TTL_MINUTES,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to cache indices: {e}")
+                
+                logger.info(f"✅ Successfully fetched {len(indices_list)} indices from Alpha Vantage")
+                return {
+                    "success": True,
+                    "data": indices_list,
+                    "source": "alpha_vantage",
+                }
         except Exception as e:
-            logger.warning(f"⚠️  IEX Cloud fetch failed: {str(e)[:100]}")
+            logger.warning(f"⚠️  Alpha Vantage fetch failed: {str(e)[:100]}")
 
-        # Step 3: Skip Finnhub for indices (doesn't support index symbols well)
-        # Going straight to yfinance instead
-        logger.info("Skipping Finnhub (not suitable for indices), trying yfinance...")
-
-        # Step 4: Fall back to yfinance
+        # Step 3: Fall back to yfinance
         try:
             import yfinance as yf
             logger.info("📊 Fetching indices from yfinance (fallback)...")
@@ -300,7 +244,7 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"⚠️  yfinance fetch failed: {str(e)[:100]}")
 
-        # Step 5: Fall back to database - get last-known indices
+        # Step 4: Fall back to database - get last-known indices
         logger.warning("⚠️  Getting last-known indices from database...")
         
         try:
@@ -339,7 +283,7 @@ class MarketDataService:
         except Exception as e:
             logger.error(f"Failed to get indices from database: {str(e)[:100]}")
 
-        # Step 6: Use initialization data as last resort
+        # Step 5: Use initialization data as last resort
         # These are realistic reference values from May 25, 2026
         logger.warning("⚠️  Using initialization data (no live data available)")
         
@@ -396,7 +340,7 @@ class MarketDataService:
         except Exception as e:
             logger.error(f"Failed to create initialization data: {str(e)[:100]}")
 
-        # Step 7: Everything completely failed - return error
+        # Step 6: Everything completely failed - return error
         logger.error("🚨 Unable to fetch indices from any source")
         return {
             "success": False,
