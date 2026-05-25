@@ -3,7 +3,6 @@ Market data service with fallback logic and caching.
 """
 
 import decimal
-import asyncio
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Dict
@@ -51,18 +50,16 @@ class MarketDataService:
 
     async def get_indices(self) -> dict:
         """
-        Get major US market indices using yfinance library (most reliable).
+        Get major US market indices using YahooFinanceClient.
         
         Priority:
         1. Check cache (5 min TTL)
-        2. yfinance library (reliable, handles all Yahoo Finance quirks)
-        3. Return error if no data available
+        2. Yahoo Finance API (with all anti-rate-limit measures)
+        3. Return error if not available
         
         Returns:
             Dict with success status and index data or error
         """
-        import yfinance as yf
-        
         cache_key = CacheKeyBuilder.indices()
         
         # Step 1: Check cache
@@ -78,90 +75,21 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
 
-        # Step 2: Use yfinance (most reliable)
+        # Step 2: Use YahooFinanceClient (has rate limiting, crumb handling, user-agent rotation)
         try:
-            logger.info("📊 Trying yfinance for indices...")
+            logger.info("📊 Fetching indices from Yahoo Finance API...")
             
-            indices_dict = {}
+            symbols = ["^GSPC", "^IXIC", "^SOX"]
+            indices_result = await self.yahoo_client.fetch_indices(symbols)
             
-            index_info = {
-                "^GSPC": "S&P 500",
-                "^IXIC": "納斯達克綜合指數",
-                "^SOX": "費城半導體指數",
-            }
-            
-            for symbol, zh_name in index_info.items():
-                try:
-                    # Run yfinance in thread to avoid blocking event loop
-                    logger.info(f"   Fetching {symbol}...")
-                    
-                    def fetch_yfinance_data(sym):
-                        ticker = yf.Ticker(sym)
-                        # Use 5d to get data even on market close days
-                        return ticker.history(period="5d")
-                    
-                    # Run in executor to avoid blocking
-                    loop = asyncio.get_event_loop()
-                    data = await loop.run_in_executor(None, fetch_yfinance_data, symbol)
-                    
-                    if data is None or len(data) == 0:
-                        logger.warning(f"No data from yfinance for {symbol}")
-                        continue
-                    
-                    # Get the latest row with valid data
-                    latest = data.iloc[-1]
-                    
-                    # Extract prices
-                    try:
-                        open_price = Decimal(str(latest['Open']))
-                        close_price = Decimal(str(latest['Close']))
-                        
-                        # Skip if prices are invalid
-                        if open_price <= 0 or close_price <= 0:
-                            logger.warning(f"Invalid prices for {symbol}: open={open_price}, close={close_price}")
-                            continue
-                    except (ValueError, IndexError) as e:
-                        logger.warning(f"Failed to parse prices for {symbol}: {e}")
-                        continue
-                    
-                    # Calculate change
-                    change_amount = close_price - open_price
-                    change_percent = (change_amount / open_price * 100) if open_price > 0 else Decimal("0")
-                    
-                    # Create Index object
-                    index = Index(
-                        id=symbol,
-                        code=symbol,
-                        zh_name=zh_name,
-                        current_price=close_price.quantize(Decimal("0.01")),
-                        previous_close=open_price.quantize(Decimal("0.01")),
-                        change_amount=change_amount.quantize(Decimal("0.01")),
-                        change_percent=change_percent.quantize(Decimal("0.01")),
-                        high_52w=Decimal("0"),
-                        low_52w=Decimal("0"),
-                        last_updated=datetime.utcnow(),
-                        data_source=DataSourceEnum.YAHOO_FINANCE,
-                    )
-                    
-                    indices_dict[symbol] = index
-                    logger.info(f"✅ Fetched {symbol}: {close_price}")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to fetch {symbol} from yfinance: {str(e)[:100]}")
-                    continue
-            
-            # Check if we have at least 2 indices
-            if len(indices_dict) >= 2:
-                result = {
-                    "success": True,
-                    "data": list(indices_dict.values()),
-                    "source": "yfinance",
-                }
+            if indices_result and len(indices_result) >= 2:
+                # Convert to list and cache
+                indices_list = list(indices_result.values())
                 
                 # Cache successful result
                 try:
                     cache_data = {
-                        "indices": [idx.dict() for idx in indices_dict.values()]
+                        "indices": [idx.dict() for idx in indices_list]
                     }
                     await self.cache_manager.set(
                         cache_key,
@@ -172,13 +100,17 @@ class MarketDataService:
                 except Exception as e:
                     logger.warning(f"Failed to cache indices: {e}")
                 
-                logger.info(f"✅ Successfully fetched {len(indices_dict)} indices from yfinance")
-                return result
+                logger.info(f"✅ Successfully fetched {len(indices_list)} indices from Yahoo Finance")
+                return {
+                    "success": True,
+                    "data": indices_list,
+                    "source": "yahoo_finance",
+                }
             else:
-                logger.warning(f"Insufficient indices from yfinance: {len(indices_dict)}")
+                logger.warning(f"Insufficient indices from Yahoo Finance: {len(indices_result) if indices_result else 0}")
                 
         except Exception as e:
-            logger.error(f"❌ yfinance failed: {str(e)[:100]}")
+            logger.error(f"❌ Yahoo Finance API failed: {str(e)[:100]}")
 
         # Step 3: All options exhausted - return error
         logger.error("🚨 Unable to fetch indices from any source")
