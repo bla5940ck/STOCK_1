@@ -56,8 +56,7 @@ class MarketDataService:
         Priority:
         1. Check cache (5 min TTL)
         2. yfinance library (reliable, handles all Yahoo Finance quirks)
-        3. Return stale cache if available
-        4. Return error
+        3. Return error if no data available
         
         Returns:
             Dict with success status and index data or error
@@ -98,7 +97,8 @@ class MarketDataService:
                     
                     def fetch_yfinance_data(sym):
                         ticker = yf.Ticker(sym)
-                        return ticker.history(period="1d")
+                        # Use 5d to get data even on market close days
+                        return ticker.history(period="5d")
                     
                     # Run in executor to avoid blocking
                     loop = asyncio.get_event_loop()
@@ -108,12 +108,21 @@ class MarketDataService:
                         logger.warning(f"No data from yfinance for {symbol}")
                         continue
                     
-                    # Get the latest row
+                    # Get the latest row with valid data
                     latest = data.iloc[-1]
                     
                     # Extract prices
-                    open_price = Decimal(str(latest['Open']))
-                    close_price = Decimal(str(latest['Close']))
+                    try:
+                        open_price = Decimal(str(latest['Open']))
+                        close_price = Decimal(str(latest['Close']))
+                        
+                        # Skip if prices are invalid
+                        if open_price <= 0 or close_price <= 0:
+                            logger.warning(f"Invalid prices for {symbol}: open={open_price}, close={close_price}")
+                            continue
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Failed to parse prices for {symbol}: {e}")
+                        continue
                     
                     # Calculate change
                     change_amount = close_price - open_price
@@ -171,23 +180,7 @@ class MarketDataService:
         except Exception as e:
             logger.error(f"❌ yfinance failed: {str(e)[:100]}")
 
-        # Step 3: yfinance failed, try to return stale cache
-        logger.warning("❌ Trying stale cache...")
-        
-        try:
-            all_cache = await self.cache_manager.get(cache_key, ignore_ttl=True)
-            if all_cache:
-                logger.warning("⚠️  Returning STALE cached data")
-                return {
-                    "success": True,
-                    "data": [Index(**idx) for idx in all_cache["indices"]],
-                    "source": "stale_cache",
-                    "warning": "⚠️ 數據可能已過期，請稍後重試查詢最新數據"
-                }
-        except Exception as e:
-            logger.error(f"Failed to retrieve stale cache: {str(e)[:100]}")
-
-        # Step 4: All options exhausted - return error
+        # Step 3: All options exhausted - return error
         logger.error("🚨 Unable to fetch indices from any source")
         return {
             "success": False,
