@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
+import aiohttp
 
 from src.models.domain import Index, Stock, DataSourceEnum
 from src.integrations.twelve_data_client import TwelveDataClient
@@ -50,13 +51,12 @@ class MarketDataService:
 
     async def get_indices(self) -> dict:
         """
-        Get major US market indices with multiple fallback strategies.
+        Get major US market indices using Finnhub API (free tier).
         
         Priority:
         1. Check cache (5 min TTL)
-        2. Try Yahoo Finance API
-        3. Try hardcoded fallback indices (last known good values)
-        4. Return error if all fail
+        2. Finnhub API (more reliable on Render than Yahoo Finance)
+        3. Return error if not available
         
         Returns:
             Dict with success status and index data or error
@@ -76,16 +76,84 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
 
-        # Step 2: Try Yahoo Finance API
+        # Step 2: Use Finnhub API (free tier supports real-time quotes)
         try:
-            logger.info("📊 Attempting Yahoo Finance API...")
+            logger.info("📊 Fetching indices from Finnhub API...")
             
-            symbols = ["^GSPC", "^IXIC", "^SOX"]
-            indices_result = await self.yahoo_client.fetch_indices(symbols)
+            indices_dict = {}
             
-            if indices_result and len(indices_result) >= 2:
-                # Convert to list and cache
-                indices_list = list(indices_result.values())
+            # Index symbols and Chinese names
+            index_info = {
+                "^GSPC": "S&P 500",
+                "^IXIC": "納斯達克綜合指數",
+                "^SOX": "費城半導體指數",
+            }
+            
+            # Get Finnhub API key from config
+            import os
+            api_key = os.getenv("FINNHUB_API_KEY", "demo")
+            
+            # Fetch each index from Finnhub
+            for symbol, zh_name in index_info.items():
+                try:
+                    logger.info(f"   Fetching {symbol}...")
+                    
+                    url = "https://finnhub.io/api/v1/quote"
+                    params = {
+                        "symbol": symbol,
+                        "token": api_key,
+                    }
+                    
+                    session = await self.finnhub_client._get_session()
+                    
+                    async with session.get(
+                        url,
+                        params=params,
+                        timeout=aiohttp.ClientTimeout(total=8),
+                    ) as response:
+                        if response.status != 200:
+                            logger.warning(f"Finnhub error for {symbol}: {response.status}")
+                            continue
+                        
+                        data = await response.json()
+                        
+                        # Extract quote data
+                        if not data or "c" not in data or data["c"] <= 0:
+                            logger.warning(f"No valid quote data for {symbol}")
+                            continue
+                        
+                        current_price = Decimal(str(data["c"]))  # current price
+                        previous_close = Decimal(str(data["pc"]))  # previous close
+                        
+                        # Calculate change
+                        change_amount = current_price - previous_close
+                        change_percent = (change_amount / previous_close * 100) if previous_close > 0 else Decimal("0")
+                        
+                        # Create Index object
+                        index = Index(
+                            id=symbol,
+                            code=symbol,
+                            zh_name=zh_name,
+                            current_price=current_price.quantize(Decimal("0.01")),
+                            previous_close=previous_close.quantize(Decimal("0.01")),
+                            change_amount=change_amount.quantize(Decimal("0.01")),
+                            change_percent=change_percent.quantize(Decimal("0.01")),
+                            high_52w=Decimal(str(data.get("h", 0))).quantize(Decimal("0.01")) if data.get("h") else Decimal("0"),
+                            low_52w=Decimal(str(data.get("l", 0))).quantize(Decimal("0.01")) if data.get("l") else Decimal("0"),
+                            last_updated=datetime.utcnow(),
+                            data_source=DataSourceEnum.FINNHUB,
+                        )
+                        
+                        indices_dict[symbol] = index
+                        logger.info(f"✅ Fetched {symbol}: {current_price}")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {symbol} from Finnhub: {str(e)[:100]}")
+                    continue
+            
+            # Check if we have at least 2 indices
+            if len(indices_dict) >= 2:
+                indices_list = list(indices_dict.values())
                 
                 # Cache successful result
                 try:
@@ -101,93 +169,19 @@ class MarketDataService:
                 except Exception as e:
                     logger.warning(f"Failed to cache indices: {e}")
                 
-                logger.info(f"✅ Successfully fetched {len(indices_list)} indices from Yahoo Finance")
+                logger.info(f"✅ Successfully fetched {len(indices_list)} indices from Finnhub")
                 return {
                     "success": True,
                     "data": indices_list,
-                    "source": "yahoo_finance",
+                    "source": "finnhub",
                 }
             else:
-                logger.warning(f"Insufficient indices from Yahoo Finance: {len(indices_result) if indices_result else 0}")
+                logger.warning(f"Insufficient indices from Finnhub: {len(indices_dict)}")
                 
         except Exception as e:
-            logger.error(f"❌ Yahoo Finance API failed: {str(e)[:100]}")
+            logger.error(f"❌ Finnhub API failed: {str(e)[:100]}")
 
-        # Step 3: Fallback - use hardcoded reference indices (last known good values)
-        # These are used when all live APIs fail (e.g., rate limits, network issues)
-        logger.warning("⚠️  Using fallback indices (last known values)...")
-        
-        try:
-            # Fallback indices - these are approximate last known values
-            # In production, this would be the last successfully cached data
-            fallback_indices = [
-                Index(
-                    id="^GSPC",
-                    code="^GSPC",
-                    zh_name="S&P 500",
-                    current_price=Decimal("5250.00"),
-                    previous_close=Decimal("5240.00"),
-                    change_amount=Decimal("10.00"),
-                    change_percent=Decimal("0.19"),
-                    high_52w=Decimal("5800.00"),
-                    low_52w=Decimal("4800.00"),
-                    last_updated=datetime.utcnow(),
-                    data_source=DataSourceEnum.YAHOO_FINANCE,
-                ),
-                Index(
-                    id="^IXIC",
-                    code="^IXIC",
-                    zh_name="納斯達克綜合指數",
-                    current_price=Decimal("16800.00"),
-                    previous_close=Decimal("16750.00"),
-                    change_amount=Decimal("50.00"),
-                    change_percent=Decimal("0.30"),
-                    high_52w=Decimal("18500.00"),
-                    low_52w=Decimal("14000.00"),
-                    last_updated=datetime.utcnow(),
-                    data_source=DataSourceEnum.YAHOO_FINANCE,
-                ),
-                Index(
-                    id="^SOX",
-                    code="^SOX",
-                    zh_name="費城半導體指數",
-                    current_price=Decimal("4100.00"),
-                    previous_close=Decimal("4080.00"),
-                    change_amount=Decimal("20.00"),
-                    change_percent=Decimal("0.49"),
-                    high_52w=Decimal("5200.00"),
-                    low_52w=Decimal("3000.00"),
-                    last_updated=datetime.utcnow(),
-                    data_source=DataSourceEnum.YAHOO_FINANCE,
-                ),
-            ]
-            
-            # Cache fallback result
-            try:
-                cache_data = {
-                    "indices": [idx.dict() for idx in fallback_indices]
-                }
-                await self.cache_manager.set(
-                    cache_key,
-                    cache_data,
-                    "index",
-                    CachePolicies.INDEX_TTL_MINUTES,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to cache fallback indices: {e}")
-            
-            logger.info(f"✅ Using {len(fallback_indices)} fallback indices")
-            return {
-                "success": True,
-                "data": fallback_indices,
-                "source": "fallback",
-                "warning": "⚠️ 數據為最近一次成功獲取的值，可能不是實時數據",
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to create fallback indices: {str(e)[:100]}")
-
-        # Step 4: All options exhausted - return error
+        # Step 3: All options exhausted - return error
         logger.error("🚨 Unable to fetch indices from any source")
         return {
             "success": False,
