@@ -186,3 +186,62 @@ class FinnhubClient:
         except (KeyError, TypeError, ValueError) as e:
             logger.error(f"Failed to parse Finnhub response for {symbol}: {e}")
             return None
+
+    async def fetch_quote(self, symbol: str) -> Optional[Dict]:
+        """
+        Fetch raw quote data for any symbol (stocks or indices).
+        
+        Args:
+            symbol: Symbol (e.g., "AAPL" or "^GSPC")
+            
+        Returns:
+            Raw quote dict or None if failed
+        """
+        session = await self._get_session()
+        
+        url = f"{self.BASE_URL}/quote"
+        params = {
+            "symbol": symbol.upper(),
+            "token": self.api_key,
+        }
+
+        try:
+            async with session.get(
+                url,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
+            ) as response:
+                if response.status != 200:
+                    logger.warning(f"Finnhub API error for {symbol}: {response.status}")
+                    return None
+
+                data = await response.json()
+                if data and "c" in data:
+                    return data
+                return None
+
+        except Exception as e:
+            logger.warning(f"Finnhub quote fetch failed for {symbol}: {str(e)[:100]}")
+            return None
+
+    async def fetch_indices(self, symbols: list[str]) -> Dict[str, Dict]:
+        """
+        Fetch multiple index quotes.
+        
+        Args:
+            symbols: List of index symbols (e.g., ["^GSPC", "^IXIC", "^SOX"])
+            
+        Returns:
+            Dict mapping symbol -> quote data
+        """
+        results = {}
+        
+        for symbol in symbols:
+            quote = await self.fetch_quote(symbol)
+            if quote:
+                results[symbol] = quote
+                logger.info(f"✅ Fetched {symbol} from Finnhub: ${quote.get('c')}")
+            else:
+                logger.warning(f"⚠️ Failed to fetch {symbol} from Finnhub")
+        
+        return results
