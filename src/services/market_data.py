@@ -7,7 +7,6 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
-import aiohttp
 
 from src.models.domain import Index, Stock, DataSourceEnum
 from src.integrations.twelve_data_client import TwelveDataClient
@@ -51,12 +50,13 @@ class MarketDataService:
 
     async def get_indices(self) -> dict:
         """
-        Get major US market indices using Finnhub API (free tier).
+        Get major US market indices using AlphaVantage API (configured API key available).
         
         Priority:
         1. Check cache (5 min TTL)
-        2. Finnhub API (more reliable on Render than Yahoo Finance)
-        3. Return error if not available
+        2. AlphaVantage API (has configured API key in .env)
+        3. Yahoo Finance as fallback
+        4. Return error if all fail
         
         Returns:
             Dict with success status and index data or error
@@ -76,84 +76,16 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
 
-        # Step 2: Use Finnhub API (free tier supports real-time quotes)
+        # Step 2: Try AlphaVantage API (has configured API key)
         try:
-            logger.info("📊 Fetching indices from Finnhub API...")
+            logger.info("📊 Fetching indices from AlphaVantage API...")
             
-            indices_dict = {}
+            symbols = ["^GSPC", "^IXIC", "^SOX"]
+            indices_result = await self.alpha_vantage_client.fetch_indices(symbols)
             
-            # Index symbols and Chinese names
-            index_info = {
-                "^GSPC": "S&P 500",
-                "^IXIC": "納斯達克綜合指數",
-                "^SOX": "費城半導體指數",
-            }
-            
-            # Get Finnhub API key from config
-            import os
-            api_key = os.getenv("FINNHUB_API_KEY", "demo")
-            
-            # Fetch each index from Finnhub
-            for symbol, zh_name in index_info.items():
-                try:
-                    logger.info(f"   Fetching {symbol}...")
-                    
-                    url = "https://finnhub.io/api/v1/quote"
-                    params = {
-                        "symbol": symbol,
-                        "token": api_key,
-                    }
-                    
-                    session = await self.finnhub_client._get_session()
-                    
-                    async with session.get(
-                        url,
-                        params=params,
-                        timeout=aiohttp.ClientTimeout(total=8),
-                    ) as response:
-                        if response.status != 200:
-                            logger.warning(f"Finnhub error for {symbol}: {response.status}")
-                            continue
-                        
-                        data = await response.json()
-                        
-                        # Extract quote data
-                        if not data or "c" not in data or data["c"] <= 0:
-                            logger.warning(f"No valid quote data for {symbol}")
-                            continue
-                        
-                        current_price = Decimal(str(data["c"]))  # current price
-                        previous_close = Decimal(str(data["pc"]))  # previous close
-                        
-                        # Calculate change
-                        change_amount = current_price - previous_close
-                        change_percent = (change_amount / previous_close * 100) if previous_close > 0 else Decimal("0")
-                        
-                        # Create Index object
-                        index = Index(
-                            id=symbol,
-                            code=symbol,
-                            zh_name=zh_name,
-                            current_price=current_price.quantize(Decimal("0.01")),
-                            previous_close=previous_close.quantize(Decimal("0.01")),
-                            change_amount=change_amount.quantize(Decimal("0.01")),
-                            change_percent=change_percent.quantize(Decimal("0.01")),
-                            high_52w=Decimal(str(data.get("h", 0))).quantize(Decimal("0.01")) if data.get("h") else Decimal("0"),
-                            low_52w=Decimal(str(data.get("l", 0))).quantize(Decimal("0.01")) if data.get("l") else Decimal("0"),
-                            last_updated=datetime.utcnow(),
-                            data_source=DataSourceEnum.FINNHUB,
-                        )
-                        
-                        indices_dict[symbol] = index
-                        logger.info(f"✅ Fetched {symbol}: {current_price}")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to fetch {symbol} from Finnhub: {str(e)[:100]}")
-                    continue
-            
-            # Check if we have at least 2 indices
-            if len(indices_dict) >= 2:
-                indices_list = list(indices_dict.values())
+            if indices_result and len(indices_result) >= 2:
+                # Convert to list and cache
+                indices_list = list(indices_result.values())
                 
                 # Cache successful result
                 try:
@@ -169,19 +101,56 @@ class MarketDataService:
                 except Exception as e:
                     logger.warning(f"Failed to cache indices: {e}")
                 
-                logger.info(f"✅ Successfully fetched {len(indices_list)} indices from Finnhub")
+                logger.info(f"✅ Successfully fetched {len(indices_list)} indices from AlphaVantage")
                 return {
                     "success": True,
                     "data": indices_list,
-                    "source": "finnhub",
+                    "source": "alpha_vantage",
                 }
             else:
-                logger.warning(f"Insufficient indices from Finnhub: {len(indices_dict)}")
+                logger.warning(f"Insufficient indices from AlphaVantage: {len(indices_result) if indices_result else 0}")
                 
         except Exception as e:
-            logger.error(f"❌ Finnhub API failed: {str(e)[:100]}")
+            logger.error(f"❌ AlphaVantage API failed: {str(e)[:100]}")
 
-        # Step 3: All options exhausted - return error
+        # Step 3: Fallback to Yahoo Finance
+        try:
+            logger.info("📊 Trying Yahoo Finance API as fallback...")
+            
+            symbols = ["^GSPC", "^IXIC", "^SOX"]
+            indices_result = await self.yahoo_client.fetch_indices(symbols)
+            
+            if indices_result and len(indices_result) >= 2:
+                # Convert to list and cache
+                indices_list = list(indices_result.values())
+                
+                # Cache successful result
+                try:
+                    cache_data = {
+                        "indices": [idx.dict() for idx in indices_list]
+                    }
+                    await self.cache_manager.set(
+                        cache_key,
+                        cache_data,
+                        "index",
+                        CachePolicies.INDEX_TTL_MINUTES,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to cache indices: {e}")
+                
+                logger.info(f"✅ Successfully fetched {len(indices_list)} indices from Yahoo Finance")
+                return {
+                    "success": True,
+                    "data": indices_list,
+                    "source": "yahoo_finance",
+                }
+            else:
+                logger.warning(f"Insufficient indices from Yahoo Finance: {len(indices_result) if indices_result else 0}")
+                
+        except Exception as e:
+            logger.error(f"❌ Yahoo Finance fallback failed: {str(e)[:100]}")
+
+        # Step 4: All options exhausted - return error
         logger.error("🚨 Unable to fetch indices from any source")
         return {
             "success": False,
