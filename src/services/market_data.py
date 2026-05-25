@@ -3,6 +3,7 @@ Market data service with fallback logic and caching.
 """
 
 import decimal
+import asyncio
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Dict
@@ -50,17 +51,18 @@ class MarketDataService:
 
     async def get_indices(self) -> dict:
         """
-        Get major US market indices using AlphaVantage API (configured API key available).
+        Get major US market indices - simplified approach using requests library.
         
-        Priority:
+        Strategy:
         1. Check cache (5 min TTL)
-        2. AlphaVantage API (has configured API key in .env)
-        3. Yahoo Finance as fallback
-        4. Return error if all fail
+        2. Fetch from Yahoo Finance quoteSummary endpoint using requests
+        3. Return error if all fail
         
         Returns:
             Dict with success status and index data or error
         """
+        import requests
+        
         cache_key = CacheKeyBuilder.indices()
         
         # Step 1: Check cache
@@ -76,53 +78,105 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
 
-        # Step 2: Try AlphaVantage API (has configured API key)
+        # Step 2: Fetch from Yahoo Finance using requests library
         try:
-            logger.info("📊 Fetching indices from AlphaVantage API...")
+            logger.info("📊 Fetching indices from Yahoo Finance...")
             
-            symbols = ["^GSPC", "^IXIC", "^SOX"]
-            indices_result = await self.alpha_vantage_client.fetch_indices(symbols)
-            
-            if indices_result and len(indices_result) >= 2:
-                # Convert to list and cache
-                indices_list = list(indices_result.values())
+            def fetch_indices_sync():
+                """Synchronous function to fetch indices"""
+                indices_dict = {}
                 
-                # Cache successful result
-                try:
-                    cache_data = {
-                        "indices": [idx.dict() for idx in indices_list]
-                    }
-                    await self.cache_manager.set(
-                        cache_key,
-                        cache_data,
-                        "index",
-                        CachePolicies.INDEX_TTL_MINUTES,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to cache indices: {e}")
-                
-                logger.info(f"✅ Successfully fetched {len(indices_list)} indices from AlphaVantage")
-                return {
-                    "success": True,
-                    "data": indices_list,
-                    "source": "alpha_vantage",
+                index_symbols = {
+                    "GSPC": ("S&P 500", "^GSPC"),
+                    "IXIC": ("納斯達克綜合指數", "^IXIC"),
+                    "SOX": ("費城半導體指數", "^SOX"),
                 }
-            else:
-                logger.warning(f"Insufficient indices from AlphaVantage: {len(indices_result) if indices_result else 0}")
                 
-        except Exception as e:
-            logger.error(f"❌ AlphaVantage API failed: {str(e)[:100]}")
-
-        # Step 3: Fallback to Yahoo Finance
-        try:
-            logger.info("📊 Trying Yahoo Finance API as fallback...")
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                }
+                
+                for symbol_key, (zh_name, full_symbol) in index_symbols.items():
+                    try:
+                        logger.info(f"   Fetching {full_symbol}...")
+                        
+                        url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{full_symbol}"
+                        params = {"modules": "price"}
+                        
+                        response = requests.get(
+                            url,
+                            params=params,
+                            headers=headers,
+                            timeout=5,
+                        )
+                        
+                        if response.status_code != 200:
+                            logger.warning(f"Yahoo Finance returned {response.status_code} for {full_symbol}")
+                            continue
+                        
+                        data = response.json()
+                        
+                        # Extract price data from quoteSummary
+                        result = data.get("quoteSummary", {}).get("result", [{}])
+                        if not result:
+                            logger.warning(f"No result data for {full_symbol}")
+                            continue
+                        
+                        price_data = result[0].get("price", {})
+                        
+                        if not price_data:
+                            logger.warning(f"No price data for {full_symbol}")
+                            continue
+                        
+                        # Extract prices safely
+                        current_price_obj = price_data.get("regularMarketPrice", {})
+                        previous_close_obj = price_data.get("regularMarketPreviousClose", {})
+                        
+                        if not current_price_obj or "raw" not in current_price_obj:
+                            logger.warning(f"Missing current price for {full_symbol}")
+                            continue
+                        
+                        current_price = Decimal(str(current_price_obj.get("raw", 0)))
+                        previous_close = Decimal(str(previous_close_obj.get("raw", 0)))
+                        
+                        if current_price <= 0:
+                            logger.warning(f"Invalid price for {full_symbol}: {current_price}")
+                            continue
+                        
+                        # Calculate change
+                        change_amount = current_price - previous_close
+                        change_percent = (change_amount / previous_close * 100) if previous_close > 0 else Decimal("0")
+                        
+                        # Create Index object
+                        index = Index(
+                            id=full_symbol,
+                            code=full_symbol,
+                            zh_name=zh_name,
+                            current_price=current_price.quantize(Decimal("0.01")),
+                            previous_close=previous_close.quantize(Decimal("0.01")),
+                            change_amount=change_amount.quantize(Decimal("0.01")),
+                            change_percent=change_percent.quantize(Decimal("0.01")),
+                            high_52w=Decimal("0"),
+                            low_52w=Decimal("0"),
+                            last_updated=datetime.utcnow(),
+                            data_source=DataSourceEnum.YAHOO_FINANCE,
+                        )
+                        
+                        indices_dict[full_symbol] = index
+                        logger.info(f"✅ Fetched {full_symbol}: {current_price}")
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch {full_symbol}: {str(e)[:100]}")
+                        continue
+                
+                return indices_dict
             
-            symbols = ["^GSPC", "^IXIC", "^SOX"]
-            indices_result = await self.yahoo_client.fetch_indices(symbols)
+            # Run synchronous requests in thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            indices_dict = await loop.run_in_executor(None, fetch_indices_sync)
             
-            if indices_result and len(indices_result) >= 2:
-                # Convert to list and cache
-                indices_list = list(indices_result.values())
+            if indices_dict and len(indices_dict) >= 2:
+                indices_list = list(indices_dict.values())
                 
                 # Cache successful result
                 try:
@@ -138,19 +192,19 @@ class MarketDataService:
                 except Exception as e:
                     logger.warning(f"Failed to cache indices: {e}")
                 
-                logger.info(f"✅ Successfully fetched {len(indices_list)} indices from Yahoo Finance")
+                logger.info(f"✅ Successfully fetched {len(indices_list)} indices")
                 return {
                     "success": True,
                     "data": indices_list,
                     "source": "yahoo_finance",
                 }
             else:
-                logger.warning(f"Insufficient indices from Yahoo Finance: {len(indices_result) if indices_result else 0}")
+                logger.warning(f"Insufficient indices fetched: {len(indices_dict) if indices_dict else 0}")
                 
         except Exception as e:
-            logger.error(f"❌ Yahoo Finance fallback failed: {str(e)[:100]}")
+            logger.error(f"❌ Fetch failed: {str(e)[:100]}")
 
-        # Step 4: All options exhausted - return error
+        # Step 3: All options exhausted - return error
         logger.error("🚨 Unable to fetch indices from any source")
         return {
             "success": False,
