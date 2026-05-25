@@ -47,7 +47,8 @@ class WebScraper:
     
     async def fetch_index(self, symbol: str) -> Optional[Index]:
         """
-        Fetch index data by scraping Yahoo Finance.
+        Fetch index data using yfinance via async executor.
+        Simpler and more reliable than direct API calls.
         
         Args:
             symbol: Index symbol (e.g., "^GSPC")
@@ -56,87 +57,92 @@ class WebScraper:
             Index object or None if failed
         """
         try:
-            session = await self._get_session()
-            
-            # Try Yahoo Finance API endpoint first (returns JSON)
-            url = f"{self.YAHOO_FINANCE_URL}/{symbol}"
-            
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-            
-            params = {
-                "modules": "price",
-            }
-            
             logger.info(f"Fetching {symbol} from Yahoo Finance...")
             
-            async with session.get(
-                url,
-                params=params,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=self.TIMEOUT),
-            ) as response:
-                if response.status != 200:
-                    logger.warning(f"Yahoo Finance returned {response.status} for {symbol}")
-                    return None
+            # Run yfinance in thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            index = await loop.run_in_executor(
+                None, 
+                self._fetch_with_yfinance, 
+                symbol
+            )
+            
+            if index:
+                logger.info(f"✅ Fetched {symbol}: {index.current_price}")
+                return index
+            else:
+                logger.warning(f"No data returned for {symbol}")
+                return None
                 
-                data = await response.json()
-                
-                # Parse response
-                try:
-                    price_data = data.get("quoteSummary", {}).get("result", [{}])[0].get("price", {})
-                    
-                    if not price_data:
-                        logger.warning(f"No price data for {symbol}")
-                        return None
-                    
-                    current_price = Decimal(str(price_data.get("regularMarketPrice", {}).get("raw", 0)))
-                    previous_close = Decimal(str(price_data.get("regularMarketPreviousClose", {}).get("raw", 0)))
-                    
-                    if current_price <= 0 or previous_close <= 0:
-                        logger.warning(f"Invalid price data for {symbol}: current={current_price}, prev={previous_close}")
-                        return None
-                    
-                    change_amount = current_price - previous_close
-                    change_percent = (change_amount / previous_close * 100) if previous_close > 0 else Decimal("0")
-                    
-                    # Map symbol to Chinese name
-                    symbol_names = {
-                        "^GSPC": "S&P 500",
-                        "^IXIC": "納斯達克綜合指數",
-                        "^SOX": "費城半導體指數",
-                    }
-                    
-                    index = Index(
-                        id=symbol,
-                        code=symbol,
-                        zh_name=symbol_names.get(symbol, symbol),
-                        current_price=current_price.quantize(Decimal("0.01")),
-                        previous_close=previous_close.quantize(Decimal("0.01")),
-                        change_amount=change_amount.quantize(Decimal("0.01")),
-                        change_percent=change_percent.quantize(Decimal("0.01")),
-                        high_52w=Decimal(str(price_data.get("fiftyTwoWeekHigh", {}).get("raw", 0))).quantize(Decimal("0.01")),
-                        low_52w=Decimal(str(price_data.get("fiftyTwoWeekLow", {}).get("raw", 0))).quantize(Decimal("0.01")),
-                        last_updated=datetime.utcnow(),
-                        data_source=DataSourceEnum.YAHOO_FINANCE,
-                    )
-                    
-                    logger.info(f"✅ Scraped {symbol}: {current_price} (change: {change_percent}%)")
-                    return index
-                    
-                except (KeyError, ValueError, TypeError) as e:
-                    logger.warning(f"Failed to parse response for {symbol}: {e}")
-                    return None
-        
         except asyncio.TimeoutError:
-            logger.warning(f"Timeout scraping {symbol}")
-            return None
-        except aiohttp.ClientError as e:
-            logger.warning(f"Network error scraping {symbol}: {e}")
+            logger.warning(f"Timeout fetching {symbol}")
             return None
         except Exception as e:
-            logger.warning(f"Unexpected error scraping {symbol}: {e}")
+            logger.warning(f"Error fetching {symbol}: {e}")
+            return None
+    
+    def _fetch_with_yfinance(self, symbol: str) -> Optional[Index]:
+        """
+        Synchronous function to fetch index data using yfinance.
+        
+        Args:
+            symbol: Index symbol
+            
+        Returns:
+            Index object or None
+        """
+        try:
+            import yfinance as yf
+            
+            # Get ticker data
+            ticker = yf.Ticker(symbol)
+            hist = ticker.history(period="5d")  # Get last 5 days to ensure we have data
+            
+            if hist is None or len(hist) == 0:
+                logger.warning(f"No historical data for {symbol}")
+                return None
+            
+            # Get latest and previous data
+            latest = hist.iloc[-1]
+            previous = hist.iloc[-2] if len(hist) > 1 else latest
+            
+            current_price = Decimal(str(latest['Close']))
+            previous_close = Decimal(str(previous['Close']))
+            high_52w = Decimal(str(hist['High'].max()))
+            low_52w = Decimal(str(hist['Low'].min()))
+            
+            if current_price <= 0 or previous_close <= 0:
+                logger.warning(f"Invalid price for {symbol}: current={current_price}, prev={previous_close}")
+                return None
+            
+            change_amount = current_price - previous_close
+            change_percent = (change_amount / previous_close * 100) if previous_close > 0 else Decimal("0")
+            
+            # Map symbol to Chinese name
+            symbol_names = {
+                "^GSPC": "S&P 500",
+                "^IXIC": "納斯達克綜合指數",
+                "^SOX": "費城半導體指數",
+            }
+            
+            index = Index(
+                id=symbol,
+                code=symbol,
+                zh_name=symbol_names.get(symbol, symbol),
+                current_price=current_price.quantize(Decimal("0.01")),
+                previous_close=previous_close.quantize(Decimal("0.01")),
+                change_amount=change_amount.quantize(Decimal("0.01")),
+                change_percent=change_percent.quantize(Decimal("0.01")),
+                high_52w=high_52w.quantize(Decimal("0.01")),
+                low_52w=low_52w.quantize(Decimal("0.01")),
+                last_updated=datetime.utcnow(),
+                data_source=DataSourceEnum.YAHOO_FINANCE,
+            )
+            
+            return index
+            
+        except Exception as e:
+            logger.warning(f"yfinance error for {symbol}: {e}")
             return None
     
     async def fetch_indices(self, symbols: list[str]) -> Dict[str, Index]:
