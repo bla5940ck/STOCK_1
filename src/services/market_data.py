@@ -287,64 +287,7 @@ class MarketDataService:
         except Exception as e:
             logger.error(f"Failed to get indices from database: {str(e)[:100]}")
 
-        # Step 5: Use initialization data as last resort
-        # These are realistic reference values from May 25, 2026
-        logger.warning("⚠️  Using initialization data (no live data available)")
-        
-        try:
-            init_indices = [
-                Index(
-                    id="^GSPC",
-                    code="^GSPC",
-                    zh_name="S&P 500",
-                    current_price=Decimal("5650.75"),
-                    previous_close=Decimal("5625.50"),
-                    change_amount=Decimal("25.25"),
-                    change_percent=Decimal("0.45"),
-                    high_52w=Decimal("6100.00"),
-                    low_52w=Decimal("4800.00"),
-                    last_updated=datetime.utcnow(),
-                    data_source=DataSourceEnum.YAHOO_FINANCE,
-                ),
-                Index(
-                    id="^IXIC",
-                    code="^IXIC",
-                    zh_name="納斯達克綜合指數",
-                    current_price=Decimal("17850.50"),
-                    previous_close=Decimal("17720.25"),
-                    change_amount=Decimal("130.25"),
-                    change_percent=Decimal("0.73"),
-                    high_52w=Decimal("20200.00"),
-                    low_52w=Decimal("14000.00"),
-                    last_updated=datetime.utcnow(),
-                    data_source=DataSourceEnum.YAHOO_FINANCE,
-                ),
-                Index(
-                    id="^SOX",
-                    code="^SOX",
-                    zh_name="費城半導體指數",
-                    current_price=Decimal("12450.80"),
-                    previous_close=Decimal("12280.50"),
-                    change_amount=Decimal("170.30"),
-                    change_percent=Decimal("1.39"),
-                    high_52w=Decimal("14200.00"),
-                    low_52w=Decimal("8900.00"),
-                    last_updated=datetime.utcnow(),
-                    data_source=DataSourceEnum.YAHOO_FINANCE,
-                ),
-            ]
-            
-            return {
-                "success": True,
-                "data": init_indices,
-                "source": "initialization",
-                "warning": "⚠️ 系統無法連接即時數據源，現在使用初始化參考數據。實際市場價格可能不同，請稍後重試以獲取最新數據。",
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to create initialization data: {str(e)[:100]}")
-
-        # Step 6: Everything completely failed - return error
+        # Step 5: Everything failed - return error (no hardcoded data)
         logger.error("🚨 Unable to fetch indices from any source")
         return {
             "success": False,
