@@ -176,7 +176,7 @@ class NewsArticle(BaseModel):
     """News article model"""
     id: str
     title: str = Field(..., min_length=5, max_length=200)
-    summary: str = Field(..., min_length=50, max_length=150)  # Traditional Chinese, 100-150 chars
+    summary: str = Field(..., min_length=10, max_length=500)  # Allow shorter summaries from RSS feeds
     source: str = Field(..., max_length=50)
     url: Optional[str]
     published_at: datetime
