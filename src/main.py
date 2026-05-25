@@ -16,6 +16,7 @@ from src.db.database import init_db, close_db, get_db
 from src.utils.logger import init_logger, get_logger
 from src.exceptions import ApplicationError, SignatureError
 from src.api.webhooks import verify_webhook_request, WebhookEventHandler
+from src.api import admin
 
 # Initialize logger
 logger = init_logger()
@@ -145,6 +146,9 @@ def create_app() -> FastAPI:
                 "stock_code": stock_code,
                 "timestamp": datetime.utcnow().isoformat() + "Z",
             }
+
+    # Include admin routes
+    app.include_router(admin.router)
 
     # Webhook endpoint with signature verification
     @app.post("/webhook/line")
