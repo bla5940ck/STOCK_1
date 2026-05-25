@@ -49,12 +49,11 @@ class MarketDataService:
 
     async def get_indices(self) -> dict:
         """
-        Get major US market indices using direct CSV download from Yahoo Finance.
-        No crumb token needed - completely bypasses the crumb mechanism.
+        Get major US market indices with multiple fallback strategies.
         
         Priority:
         1. Check cache (5 min TTL)
-        2. Direct CSV download from Yahoo Finance (no crumb needed)
+        2. Yahoo Finance CSV download (direct, no crumb needed)
         3. Return stale cache if available
         4. Return error
         
@@ -80,24 +79,22 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
 
-        # Step 2: Direct CSV download from Yahoo Finance (no crumb!)
+        # Step 2: Direct CSV download from Yahoo Finance
         try:
             logger.info("📊 Trying Yahoo Finance CSV download...")
             
             indices_dict = {}
             
-            # Map of index symbols to Chinese names
             index_info = {
                 "^GSPC": "S&P 500",
                 "^IXIC": "納斯達克綜合指數",
                 "^SOX": "費城半導體指數",
             }
             
-            # Use async context manager for session
             async with aiohttp.ClientSession() as session:
                 for symbol, zh_name in index_info.items():
                     try:
-                        # Use Yahoo Finance download CSV endpoint
+                        # Use Yahoo Finance download CSV endpoint with better headers
                         url = f"https://query1.finance.yahoo.com/v7/finance/download/{symbol}"
                         
                         params = {
@@ -107,11 +104,17 @@ class MarketDataService:
                             "events": "history",
                         }
                         
+                        headers = {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Accept-Language": "en-US,en;q=0.5",
+                        }
+                        
                         async with session.get(
                             url,
                             params=params,
                             timeout=aiohttp.ClientTimeout(total=10),
-                            headers={"User-Agent": "Mozilla/5.0"},
+                            headers=headers,
                         ) as response:
                             if response.status != 200:
                                 logger.warning(f"Failed to fetch {symbol}: HTTP {response.status}")
@@ -130,7 +133,7 @@ class MarketDataService:
                             parts = latest_line.split(',')
                             
                             if len(parts) < 5:
-                                logger.warning(f"Invalid data format for {symbol}")
+                                logger.warning(f"Invalid data format for {symbol}: {latest_line}")
                                 continue
                             
                             try:
@@ -165,7 +168,7 @@ class MarketDataService:
                         logger.warning(f"Failed to fetch {symbol}: {str(e)[:100]}")
                         continue
             
-            if indices_dict:
+            if len(indices_dict) >= 2:  # At least 2 indices
                 result = {
                     "success": True,
                     "data": list(indices_dict.values()),
@@ -189,12 +192,10 @@ class MarketDataService:
                 logger.info(f"✅ Successfully fetched {len(indices_dict)} indices from Yahoo Finance CSV")
                 return result
             else:
-                logger.warning("No indices data fetched from Yahoo Finance CSV")
+                logger.warning(f"Insufficient indices fetched: {len(indices_dict)}")
                 
         except Exception as e:
             logger.error(f"❌ Yahoo Finance CSV download failed: {str(e)[:100]}")
-            import traceback
-            logger.error(traceback.format_exc())
 
         # Step 3: CSV download failed, try to return stale cache
         logger.warning("❌ Trying stale cache...")
