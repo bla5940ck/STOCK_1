@@ -15,6 +15,7 @@ from src.integrations.finnhub_client import FinnhubClient
 from src.integrations.yahoo_finance import YahooFinanceClient
 from src.integrations.alpha_vantage import AlphaVantageClient
 from src.integrations.iex_cloud import IEXCloudClient
+from src.integrations.web_scraper import WebScraper
 from src.utils.cache import CacheManager, CacheKeyBuilder, CachePolicies
 from src.utils.logger import get_logger
 from src.exceptions import APIError, TimeoutError as TimeoutException
@@ -52,14 +53,16 @@ class MarketDataService:
         if settings:
             finnhub_key = settings.FINNHUB_API_KEY
         
-        self.iex_cloud_client = IEXCloudClient()  # Try IEX Cloud first (if token set)
-        self.finnhub_client = FinnhubClient(api_key=finnhub_key or "demo")  # Now with real key
-        self.twelve_data_client = TwelveDataClient()  # Fallback
+        self.web_scraper = WebScraper()  # Primary - direct web scraping
+        self.iex_cloud_client = IEXCloudClient()  # If token set
+        self.finnhub_client = FinnhubClient(api_key=finnhub_key or "demo")  # For stocks
+        self.twelve_data_client = TwelveDataClient()  # For stocks
         self.yahoo_client = YahooFinanceClient()  # Fallback
-        self.alpha_vantage_client = AlphaVantageClient()  # Fallback
+        self.alpha_vantage_client = AlphaVantageClient()  # Last resort
 
     async def close(self):
         """Clean up resources"""
+        await self.web_scraper.close()
         await self.twelve_data_client.close()
         await self.finnhub_client.close()
         await self.yahoo_client.close()
@@ -71,10 +74,11 @@ class MarketDataService:
         
         Strategy:
         1. Check cache (5 min TTL)
-        2. Try Alpha Vantage (reliable, has API key configured)
+        2. Scrape from Yahoo Finance (no API key needed)
         3. Try yfinance library
         4. Fall back to last-known data in database
-        5. Return error if nothing available
+        5. Use initialization data as final fallback
+        6. Return error if nothing available
         
         Returns:
             Dict with success status and index data or error
@@ -94,11 +98,11 @@ class MarketDataService:
         except Exception as e:
             logger.warning(f"Cache check failed: {e}")
 
-        # Step 2: Try Alpha Vantage (primary - has API key configured)
+        # Step 2: Try Web Scraper (primary - no API key needed)
         try:
-            logger.info("📊 Fetching indices from Alpha Vantage...")
+            logger.info("📊 Scraping indices from Yahoo Finance...")
             
-            indices_dict = await self.alpha_vantage_client.fetch_indices(MAJOR_INDICES)
+            indices_dict = await self.web_scraper.fetch_indices(MAJOR_INDICES)
             
             if indices_dict and len(indices_dict) >= 2:
                 indices_list = list(indices_dict.values())
@@ -125,14 +129,14 @@ class MarketDataService:
                 except Exception as e:
                     logger.warning(f"Failed to cache indices: {e}")
                 
-                logger.info(f"✅ Successfully fetched {len(indices_list)} indices from Alpha Vantage")
+                logger.info(f"✅ Successfully scraped {len(indices_list)} indices from Yahoo Finance")
                 return {
                     "success": True,
                     "data": indices_list,
-                    "source": "alpha_vantage",
+                    "source": "web_scraper",
                 }
         except Exception as e:
-            logger.warning(f"⚠️  Alpha Vantage fetch failed: {str(e)[:100]}")
+            logger.warning(f"⚠️  Web scraper failed: {str(e)[:100]}")
 
         # Step 3: Fall back to yfinance
         try:
