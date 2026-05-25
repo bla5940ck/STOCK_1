@@ -17,13 +17,14 @@ from src.utils.logger import init_logger, get_logger
 from src.exceptions import ApplicationError, SignatureError
 from src.api.webhooks import verify_webhook_request, WebhookEventHandler
 
-# Lazy import admin to avoid import errors
+# Import admin module (will handle errors gracefully)
+admin = None
+admin_router = None
 try:
     from src.api import admin
-    admin_router = admin.router
+    admin_router = admin.router if hasattr(admin, 'router') else None
 except Exception as e:
-    print(f"Warning: Failed to import admin module: {e}")
-    admin_router = None
+    app_logger.warning(f"Failed to import admin module: {e}")
 
 # Initialize logger
 logger = init_logger()
