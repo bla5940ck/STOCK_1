@@ -3,11 +3,13 @@ Market data service with fallback logic and caching.
 """
 
 import decimal
+import asyncio
+from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.domain import Index, Stock
+from src.models.domain import Index, Stock, DataSourceEnum
 from src.integrations.twelve_data_client import TwelveDataClient
 from src.integrations.finnhub_client import FinnhubClient
 from src.integrations.yahoo_finance import YahooFinanceClient
@@ -61,8 +63,6 @@ class MarketDataService:
             Dict with success status and index data or error
         """
         import yfinance as yf
-        from datetime import datetime
-        from src.models.domain import DataSourceEnum
         
         cache_key = CacheKeyBuilder.indices()
         
@@ -93,12 +93,16 @@ class MarketDataService:
             
             for symbol, zh_name in index_info.items():
                 try:
-                    # Download 1 day of historical data (most recent)
+                    # Run yfinance in thread to avoid blocking event loop
                     logger.info(f"   Fetching {symbol}...")
-                    ticker = yf.Ticker(symbol)
                     
-                    # Get latest quote (info attribute)
-                    data = ticker.history(period="1d")
+                    def fetch_yfinance_data(sym):
+                        ticker = yf.Ticker(sym)
+                        return ticker.history(period="1d")
+                    
+                    # Run in executor to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    data = await loop.run_in_executor(None, fetch_yfinance_data, symbol)
                     
                     if data is None or len(data) == 0:
                         logger.warning(f"No data from yfinance for {symbol}")
