@@ -4,6 +4,7 @@ Web scraper for fetching market data directly from websites.
 
 import asyncio
 import aiohttp
+import decimal
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Dict
@@ -91,24 +92,85 @@ class WebScraper:
         results = {}
         
         try:
-            # Try to find patterns for each index
-            # Look for patterns like "S&P 500 5650.75 +25.25 (+0.45%)"
+            # Try using BeautifulSoup if available for better parsing
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # Look for index data in various ways
+                # Yahoo Taiwan typically shows indices with their symbols and prices
+                
+                # Try to find all text nodes that contain price patterns
+                text = soup.get_text()
+                
+                # Log sample of HTML for debugging (first 2000 chars)
+                logger.info(f"📝 HTML sample: {text[:500]}")
+                
+                # Search for S&P 500, NASDAQ, Philadelphia Semiconductor patterns
+                symbol_patterns = {
+                    "^GSPC": ["S&P 500", "标普500", "SP500", "^GSPC"],
+                    "^IXIC": ["NASDAQ", "纳斯达克", "^IXIC"],
+                    "^SOX": ["Philadelphia", "费城", "SOX", "^SOX"],
+                }
+                
+                # Extract all numbers from the page
+                import re
+                # Find all sequences of numbers with decimals, +/-, etc.
+                price_pattern = r'([0-9]{3,5}[,.]?[0-9]{0,3}\.?[0-9]{1,2})|([+-]?[0-9.]+%)'
+                
+                if any(keyword in text for keyword in ["NASDAQ", "S&P", "500"]):
+                    logger.info("✅ Found index keywords in HTML")
+                    
+                    # Try to extract S&P 500 data
+                    sp500_match = re.search(r'S&P\s*500[^0-9]*([0-9,]+\.?[0-9]*)', text, re.IGNORECASE)
+                    if sp500_match:
+                        logger.info(f"Found S&P 500: {sp500_match.group(1)}")
+                    
+                    # Try to extract NASDAQ data
+                    nasdaq_match = re.search(r'NASDAQ[^0-9]*([0-9,]+\.?[0-9]*)', text, re.IGNORECASE)
+                    if nasdaq_match:
+                        logger.info(f"Found NASDAQ: {nasdaq_match.group(1)}")
+                else:
+                    logger.warning("❌ Index keywords not found in HTML")
+                    logger.info(f"Page contains: {text[:200]}")
+                
+                return results
+                
+            except ImportError:
+                logger.info("BeautifulSoup not available, using regex fallback")
+                # If BeautifulSoup is not available, use regex patterns
+                return self._parse_with_regex(html)
+        
+        except Exception as e:
+            logger.warning(f"Error parsing HTML: {e}")
+            return {}
+    
+    def _parse_with_regex(self, html: str) -> Dict[str, Index]:
+        """
+        Fallback parsing using regex patterns.
+        
+        Args:
+            html: HTML content
             
+        Returns:
+            Dict of indices
+        """
+        results = {}
+        
+        try:
+            # Extended regex patterns with more flexibility
             patterns = {
                 "^GSPC": [
-                    r"S&P\s*500[^0-9]*([0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9\.]+%)",
-                    r"標普\s*500[^0-9]*([0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9\.]+%)",
-                    r"SP500[^0-9]*([0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9\.]+%)",
+                    r'(?:S&P|标普|SP)\s*500[^\d]*(\d{3,5}[.,]?\d{0,3})[^\d]*([+-]?\d+[.,]\d+)[^\d]*([+-]?[\d.]+%)',
+                    r'GSPC[^\d]*(\d{3,5}[.,]?\d{0,3})[^\d]*([+-]?\d+[.,]\d+)[^\d]*([+-]?[\d.]+%)',
                 ],
                 "^IXIC": [
-                    r"NASDAQ[^0-9]*([0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9\.]+%)",
-                    r"納斯達克[^0-9]*([0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9\.]+%)",
-                    r"IXIC[^0-9]*([0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9\.]+%)",
+                    r'(?:NASDAQ|纳斯达克)[^\d]*(\d{3,5}[.,]?\d{0,3})[^\d]*([+-]?\d+[.,]\d+)[^\d]*([+-]?[\d.]+%)',
+                    r'IXIC[^\d]*(\d{3,5}[.,]?\d{0,3})[^\d]*([+-]?\d+[.,]\d+)[^\d]*([+-]?[\d.]+%)',
                 ],
                 "^SOX": [
-                    r"費城半導體[^0-9]*([0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9\.]+%)",
-                    r"SOX[^0-9]*([0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9\.]+%)",
-                    r"Philadelphia[^0-9]*([0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9,]+\.?[0-9]*)[^0-9]*([+-]?[0-9\.]+%)",
+                    r'(?:Philadelphia|费城|SOX)[^\d]*(\d{3,5}[.,]?\d{0,3})[^\d]*([+-]?\d+[.,]\d+)[^\d]*([+-]?[\d.]+%)',
+                    r'SOX[^\d]*(\d{3,5}[.,]?\d{0,3})[^\d]*([+-]?\d+[.,]\d+)[^\d]*([+-]?[\d.]+%)',
                 ],
             }
             
@@ -123,16 +185,15 @@ class WebScraper:
                     match = re.search(pattern, html, re.IGNORECASE)
                     if match:
                         try:
-                            current_price = Decimal(match.group(1).replace(",", ""))
+                            current_price = Decimal(match.group(1).replace(",", "").replace(".", ""))
+                            if current_price > 100:  # Likely in valid range
+                                current_price = current_price / 100  # Adjust decimal
+                            
                             change_amount = Decimal(match.group(2).replace(",", ""))
                             change_percent_str = match.group(3).replace("%", "").replace("+", "")
                             change_percent = Decimal(change_percent_str)
                             
-                            # Calculate previous close from current price and change percent
-                            if change_percent != 0:
-                                previous_close = current_price - change_amount
-                            else:
-                                previous_close = current_price
+                            previous_close = current_price - change_amount
                             
                             if current_price > 0 and previous_close > 0:
                                 index = Index(
@@ -143,23 +204,23 @@ class WebScraper:
                                     previous_close=previous_close.quantize(Decimal("0.01")),
                                     change_amount=change_amount.quantize(Decimal("0.01")),
                                     change_percent=change_percent.quantize(Decimal("0.01")),
-                                    high_52w=Decimal("0"),  # Not available from markets page
-                                    low_52w=Decimal("0"),   # Not available from markets page
+                                    high_52w=Decimal("0"),
+                                    low_52w=Decimal("0"),
                                     last_updated=datetime.utcnow(),
                                     data_source=DataSourceEnum.YAHOO_FINANCE,
                                 )
                                 results[symbol] = index
-                                logger.info(f"✅ Parsed {symbol} from Yahoo Taiwan: {current_price}")
-                                break  # Found this symbol, move to next
-                        except (ValueError, IndexError) as e:
+                                logger.info(f"✅ Parsed {symbol} from regex: {current_price}")
+                                break
+                        except (ValueError, IndexError, decimal.InvalidOperation) as e:
                             logger.warning(f"Failed to parse {symbol}: {e}")
                             continue
             
-            logger.info(f"Successfully parsed {len(results)} indices from Yahoo Taiwan")
+            logger.info(f"Successfully parsed {len(results)} indices using regex")
             return results
         
         except Exception as e:
-            logger.warning(f"Error parsing HTML: {e}")
+            logger.warning(f"Regex parsing error: {e}")
             return {}
 
     
